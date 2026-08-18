@@ -73,6 +73,17 @@ def init_db():
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sellers (
+            token TEXT PRIMARY KEY,
+            seller_name TEXT NOT NULL,
+            booth_number TEXT,
+            contact_link TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
     conn.commit()
     conn.close()
 
@@ -179,6 +190,76 @@ class FeedbackIn(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# 셀러 토큰 검증 (QR로 들어온 셀러만 등록 가능하게)
+# ---------------------------------------------------------------------------
+def get_seller_by_token(token: str):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM sellers WHERE token = ?", (token,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+@app.get("/api/sellers/verify")
+def verify_seller_token(token: str):
+    """QR로 들어왔을 때 토큰이 유효한 셀러인지 확인하고, 사전 등록된 정보를 돌려준다."""
+    seller = get_seller_by_token(token)
+    if not seller:
+        raise HTTPException(status_code=403, detail="유효하지 않은 접근입니다. 셀러용 QR코드로 접속해주세요.")
+    return seller
+
+
+class SellerUpdate(BaseModel):
+    seller_name: str
+    contact_link: str = ""
+
+
+@app.patch("/api/sellers/{token}")
+def update_seller_info(token: str, payload: SellerUpdate):
+    """셀러 본인이 이름/연락처만 수정 가능. 부스번호는 관리자만 변경 가능."""
+    seller = get_seller_by_token(token)
+    if not seller:
+        raise HTTPException(status_code=403, detail="유효하지 않은 셀러 토큰입니다")
+    conn = get_db()
+    conn.execute(
+        "UPDATE sellers SET seller_name = ?, contact_link = ? WHERE token = ?",
+        (payload.seller_name, payload.contact_link, token),
+    )
+    conn.commit()
+    conn.close()
+    return get_seller_by_token(token)
+
+
+# ---------------------------------------------------------------------------
+# 관리자: 셀러 사전 등록 (본인만 사용 — QR 발급 전 미리 셀러 목록을 입력)
+# ---------------------------------------------------------------------------
+class SellerCreate(BaseModel):
+    seller_name: str
+    booth_number: str = ""
+    contact_link: str = ""
+
+
+@app.post("/api/admin/sellers")
+def create_seller(payload: SellerCreate):
+    token = str(uuid.uuid4())[:10]
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO sellers (token, seller_name, booth_number, contact_link) VALUES (?, ?, ?, ?)",
+        (token, payload.seller_name, payload.booth_number, payload.contact_link),
+    )
+    conn.commit()
+    conn.close()
+    return {"token": token, "sell_url": f"/sell?token={token}"}
+
+
+@app.get("/api/admin/sellers")
+def list_sellers():
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM sellers ORDER BY created_at DESC").fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+# ---------------------------------------------------------------------------
 # 셀러: 이미지 업로드 → AI 분석 (등록 전 미리보기용)
 # ---------------------------------------------------------------------------
 @app.post("/api/analyze")
@@ -189,19 +270,25 @@ async def analyze(image: UploadFile = File(...)):
 
 
 # ---------------------------------------------------------------------------
-# 셀러: 상품 등록
+# 셀러: 상품 등록 (토큰 필수 — 사전 등록된 셀러만 가능)
 # ---------------------------------------------------------------------------
 @app.post("/api/items")
 async def create_item(
-    seller_name: str = Form(...),
-    booth_number: str = Form(""),
+    token: str = Form(...),
     category: str = Form(...),
     title: str = Form(...),
     description: str = Form(""),
     price: int = Form(...),
-    contact_link: str = Form(""),
     image: UploadFile = File(...),
 ):
+    seller = get_seller_by_token(token)
+    if not seller:
+        raise HTTPException(status_code=403, detail="유효하지 않은 셀러 토큰입니다")
+
+    seller_name = seller["seller_name"]
+    booth_number = seller["booth_number"]
+    contact_link = seller["contact_link"]
+
     item_id = str(uuid.uuid4())[:8]
     ext = Path(image.filename or "jpg").suffix or ".jpg"
     image_filename = f"{item_id}{ext}"
@@ -374,7 +461,11 @@ def serve_index():
 
 
 @app.get("/sell")
-def serve_sell():
+def serve_sell(token: Optional[str] = None):
+    if not token or not get_seller_by_token(token):
+        return FileResponse(
+            str(BASE_DIR / "static" / "sell_denied.html"), status_code=403
+        )
     return FileResponse(str(BASE_DIR / "static" / "sell.html"))
 
 
@@ -386,3 +477,8 @@ def serve_feed():
 @app.get("/dashboard")
 def serve_dashboard():
     return FileResponse(str(BASE_DIR / "static" / "dashboard.html"))
+
+
+@app.get("/admin")
+def serve_admin():
+    return FileResponse(str(BASE_DIR / "static" / "admin.html"))

@@ -14,7 +14,26 @@
   </div>
 
   <div class="content">
-    <form id="sell-form">
+    <div id="seller-badge" style="background:#fff; border:0.5px solid var(--border); border-radius:var(--radius-sm); padding:12px 14px; margin-bottom:16px; font-size:13px; color:var(--muted);">
+      확인 중...
+    </div>
+
+    <div id="edit-seller-form" style="display:none; background:#fff; border:0.5px solid var(--border); border-radius:var(--radius-sm); padding:14px; margin-bottom:16px;">
+      <label>셀러 이름 / 부스명</label>
+      <input type="text" id="edit-seller-name" />
+
+      <label>연락처 링크 (인스타 등)</label>
+      <input type="text" id="edit-contact-link" placeholder="예: instagram.com/아이디" />
+
+      <p style="font-size:11px; color:var(--muted); margin: -4px 0 12px;">부스 번호는 운영진만 변경할 수 있어요.</p>
+
+      <div style="display:flex; gap:8px;">
+        <button type="button" class="btn-outline" style="flex:1;" onclick="toggleEditForm(false)">취소</button>
+        <button type="button" class="btn-primary" style="flex:1;" onclick="saveSellerInfo()">저장</button>
+      </div>
+    </div>
+
+    <form id="sell-form" style="display:none;">
       <div class="upload-box" id="upload-box">
         <div class="placeholder" id="upload-placeholder">
           📷<br />사진 촬영 / 업로드
@@ -26,12 +45,6 @@
       <div class="ai-badge" id="ai-badge" style="display:none">
         <span id="ai-badge-text">✨ AI가 분석 중...</span>
       </div>
-
-      <label>셀러 이름 / 부스명</label>
-      <input type="text" id="seller-name" placeholder="예: 민지의 레코드샵" required />
-
-      <label>부스 번호 (선택)</label>
-      <input type="text" id="booth-number" placeholder="예: 7" />
 
       <label>카테고리</label>
       <div class="tag-row" id="category-tags" style="margin-bottom:12px;">
@@ -50,9 +63,6 @@
       <label>가격 (원)</label>
       <input type="number" id="price" placeholder="예: 15000" required />
 
-      <label>연락처 링크 (선택 — 인스타 DM, 오픈채팅 등)</label>
-      <input type="text" id="contact-link" placeholder="예: instagram.com/아이디" />
-
       <button type="submit" class="btn-primary" style="margin-top:8px;">등록하기</button>
     </form>
   </div>
@@ -61,6 +71,9 @@
 <div class="toast" id="toast"></div>
 
 <script>
+const params = new URLSearchParams(location.search);
+const token = params.get('token');
+
 const uploadBox = document.getElementById('upload-box');
 const imageInput = document.getElementById('image-input');
 const previewImg = document.getElementById('preview-img');
@@ -70,6 +83,68 @@ const aiBadgeText = document.getElementById('ai-badge-text');
 const categoryTags = document.querySelectorAll('#category-tags .tag');
 let selectedCategory = null;
 let selectedFile = null;
+
+let currentSeller = null;
+
+async function verifySeller() {
+  const badge = document.getElementById('seller-badge');
+  if (!token) {
+    badge.textContent = '⚠️ 접근 권한이 없어요. 셀러용 QR코드로 다시 접속해주세요.';
+    return;
+  }
+  try {
+    const res = await fetch(`/api/sellers/verify?token=${encodeURIComponent(token)}`);
+    if (!res.ok) throw new Error('invalid token');
+    currentSeller = await res.json();
+    renderSellerBadge();
+    document.getElementById('sell-form').style.display = 'block';
+  } catch (err) {
+    badge.textContent = '⚠️ 접근 권한이 없어요. 셀러용 QR코드로 다시 접속해주세요.';
+  }
+}
+
+function renderSellerBadge() {
+  const badge = document.getElementById('seller-badge');
+  badge.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <span>👋 <strong>${escapeHtml(currentSeller.seller_name)}</strong>님, 환영해요${currentSeller.booth_number ? ' (부스 ' + currentSeller.booth_number + '번)' : ''}</span>
+      <button type="button" onclick="toggleEditForm(true)" style="width:auto; padding:4px 10px; font-size:11px; background:transparent; border:0.5px solid var(--border-strong); color:var(--ink);">정보 수정</button>
+    </div>
+  `;
+}
+
+function toggleEditForm(show) {
+  document.getElementById('edit-seller-form').style.display = show ? 'block' : 'none';
+  if (show) {
+    document.getElementById('edit-seller-name').value = currentSeller.seller_name;
+    document.getElementById('edit-contact-link').value = currentSeller.contact_link || '';
+  }
+}
+
+async function saveSellerInfo() {
+  const seller_name = document.getElementById('edit-seller-name').value.trim();
+  const contact_link = document.getElementById('edit-contact-link').value.trim();
+
+  if (!seller_name) {
+    showToast('이름을 입력해주세요');
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/sellers/${encodeURIComponent(token)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ seller_name, contact_link })
+    });
+    if (!res.ok) throw new Error('저장 실패');
+    currentSeller = await res.json();
+    renderSellerBadge();
+    toggleEditForm(false);
+    showToast('정보가 저장됐어요');
+  } catch (err) {
+    showToast('저장 중 오류가 발생했어요');
+  }
+}
 
 uploadBox.addEventListener('click', () => imageInput.click());
 
@@ -94,7 +169,6 @@ imageInput.addEventListener('change', async (e) => {
   };
   reader.readAsDataURL(file);
 
-  // AI 분석 요청
   aiBadge.style.display = 'flex';
   aiBadge.classList.add('loading');
   aiBadgeText.textContent = '✨ AI가 카테고리·설명 초안 작성 중...';
@@ -135,14 +209,12 @@ document.getElementById('sell-form').addEventListener('submit', async (e) => {
   }
 
   const formData = new FormData();
+  formData.append('token', token);
   formData.append('image', selectedFile);
-  formData.append('seller_name', document.getElementById('seller-name').value);
-  formData.append('booth_number', document.getElementById('booth-number').value);
   formData.append('category', selectedCategory);
   formData.append('title', document.getElementById('title').value);
   formData.append('description', document.getElementById('description').value);
   formData.append('price', document.getElementById('price').value);
-  formData.append('contact_link', document.getElementById('contact-link').value);
 
   try {
     const res = await fetch('/api/items', { method: 'POST', body: formData });
@@ -154,12 +226,20 @@ document.getElementById('sell-form').addEventListener('submit', async (e) => {
   }
 });
 
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str || '';
+  return div.innerHTML;
+}
+
 function showToast(msg) {
   const toast = document.getElementById('toast');
   toast.textContent = msg;
   toast.classList.add('show');
   setTimeout(() => toast.classList.remove('show'), 2000);
 }
+
+verifySeller();
 </script>
 </body>
 </html>

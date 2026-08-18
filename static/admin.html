@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>셀러 관리 · Digging Market Admin</title>
+<link rel="stylesheet" href="/static/style.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+</head>
+<body>
+<div class="app" style="max-width: 600px;">
+  <div class="top-nav">
+    <a href="/" class="back">←</a>
+    <h2 class="page-title">셀러 관리 (관리자용)</h2>
+  </div>
+
+  <div class="content">
+    <p style="font-size: 13px; color: var(--muted); margin: 0 0 16px;">
+      셀러를 등록하면 전용 QR코드가 생성돼요. 이 QR을 셀러에게 인쇄해서 나눠주세요.
+      이 페이지 링크는 셀러/방문객에게 공유하지 마세요.
+    </p>
+
+    <form id="seller-form" style="margin-bottom: 24px;">
+      <label>셀러 이름 / 부스명</label>
+      <input type="text" id="seller-name" placeholder="예: 민지의 레코드샵" required />
+
+      <label>부스 번호</label>
+      <input type="text" id="booth-number" placeholder="예: 7" />
+
+      <label>연락처 링크 (인스타 등)</label>
+      <input type="text" id="contact-link" placeholder="예: instagram.com/아이디" />
+
+      <button type="submit" class="btn-primary">셀러 등록 + QR 발급</button>
+    </form>
+
+    <p class="section-title" style="margin-top:0;">등록된 셀러 목록</p>
+    <div id="seller-list"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const BASE_URL = window.location.origin;
+
+document.getElementById('seller-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const payload = {
+    seller_name: document.getElementById('seller-name').value,
+    booth_number: document.getElementById('booth-number').value,
+    contact_link: document.getElementById('contact-link').value,
+  };
+  const res = await fetch('/api/admin/sellers', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (res.ok) {
+    document.getElementById('seller-form').reset();
+    showToast('셀러가 등록됐어요');
+    loadSellers();
+  } else {
+    showToast('등록 실패');
+  }
+});
+
+async function loadSellers() {
+  const res = await fetch('/api/admin/sellers');
+  const sellers = await res.json();
+  const listEl = document.getElementById('seller-list');
+
+  if (sellers.length === 0) {
+    listEl.innerHTML = '<div class="empty-state">아직 등록된 셀러가 없어요.</div>';
+    return;
+  }
+
+  listEl.innerHTML = sellers.map(s => `
+    <div style="background:#fff; border:0.5px solid var(--border); border-radius:var(--radius-sm); padding:14px; margin-bottom:10px; display:flex; gap:14px; align-items:center;">
+      <div id="qr-${s.token}" style="flex-shrink:0;"></div>
+      <div style="flex:1; min-width:0;">
+        <p style="margin:0; font-weight:600; font-size:14px;">${escapeHtml(s.seller_name)}${s.booth_number ? ' · ' + s.booth_number + '번' : ''}</p>
+        <p style="margin:4px 0; font-size:12px; color:var(--muted); word-break:break-all;">${BASE_URL}/sell?token=${s.token}</p>
+        <button class="btn-outline" style="width:auto; padding:6px 12px; font-size:12px;" onclick="copyLink('${s.token}')">링크 복사</button>
+      </div>
+    </div>
+  `).join('');
+
+  sellers.forEach(s => {
+    new QRCode(document.getElementById(`qr-${s.token}`), {
+      text: `${BASE_URL}/sell?token=${s.token}`,
+      width: 72,
+      height: 72,
+    });
+  });
+}
+
+function copyLink(token) {
+  navigator.clipboard.writeText(`${BASE_URL}/sell?token=${token}`);
+  showToast('링크가 복사됐어요');
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str || '';
+  return div.innerHTML;
+}
+
+function showToast(msg) {
+  const toast = document.getElementById('toast');
+  toast.textContent = msg;
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 2000);
+}
+
+loadSellers();
+</script>
+</body>
+</html>
