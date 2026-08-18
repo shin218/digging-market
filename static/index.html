@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+<title>Digging Market</title>
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+<div class="app">
+  <div class="hero">
+    <p class="eyebrow">Curated Vinyl &amp; Vintage Market</p>
+    <h1>Digging Market</h1>
+    <div class="tag-row">
+      <span class="tag active">Vinyl</span>
+      <span class="tag active">Cassette</span>
+      <span class="tag active">Y2K</span>
+    </div>
+  </div>
+
+  <div class="content">
+    <div class="info-row">
+      <div class="info-card">
+        <div>📅</div>
+        <div class="label" id="event-date">날짜 미정</div>
+      </div>
+      <div class="info-card">
+        <div>📍</div>
+        <div class="label" id="event-place">장소 미정</div>
+      </div>
+    </div>
+
+    <div class="btn-block">
+      <a href="/feed" style="text-decoration:none; display:block;">
+        <button class="btn-primary">🔍 상품 구경하기</button>
+      </a>
+    </div>
+    <div class="btn-block">
+      <a href="/sell" style="text-decoration:none; display:block;">
+        <button class="btn-outline">📷 셀러로 등록하기</button>
+      </a>
+    </div>
+
+    <p class="section-title">카테고리별로 보기</p>
+    <div class="category-grid">
+      <div class="category-cell" onclick="location.href='/feed?category=LP'">
+        <div>💿</div><span>LP</span>
+      </div>
+      <div class="category-cell" onclick="location.href='/feed?category=카세트'">
+        <div>📼</div><span>카세트</span>
+      </div>
+      <div class="category-cell" onclick="location.href='/feed?category=의류'">
+        <div>👕</div><span>의류</span>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

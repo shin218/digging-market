@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+<title>대시보드 · Digging Market</title>
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+<div class="app">
+  <div class="top-nav">
+    <a href="/" class="back">←</a>
+    <h2 class="page-title">운영 대시보드</h2>
+  </div>
+
+  <div class="content">
+    <div class="stat-grid" id="stat-grid">
+      <div class="stat-card"><div class="value">–</div><div class="label">불러오는 중</div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+async function loadStats() {
+  const res = await fetch('/api/stats');
+  const s = await res.json();
+  document.getElementById('stat-grid').innerHTML = `
+    <div class="stat-card">
+      <div class="value">${s.sell_through_rate}%</div>
+      <div class="label">재고 소진율 (${s.sold_items}/${s.total_items})</div>
+    </div>
+    <div class="stat-card">
+      <div class="value">${s.total_views}</div>
+      <div class="label">총 조회수</div>
+    </div>
+    <div class="stat-card">
+      <div class="value">${s.total_likes}</div>
+      <div class="label">총 찜 개수</div>
+    </div>
+    <div class="stat-card">
+      <div class="value">${s.feedback_count}</div>
+      <div class="label">설문 응답 수</div>
+    </div>
+    <div class="stat-card" style="grid-column: 1 / -1;">
+      <div class="value">${s.avg_revisit_intent ?? '–'}</div>
+      <div class="label">평균 재방문 의향 (1~5점)</div>
+    </div>
+  `;
+}
+loadStats();
+</script>
+</body>
+</html>

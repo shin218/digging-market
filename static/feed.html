@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+<title>둘러보기 · Digging Market</title>
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+<div class="app">
+  <div class="top-nav">
+    <a href="/" class="back">←</a>
+    <h2 class="page-title">둘러보기</h2>
+  </div>
+
+  <div class="content">
+    <div class="filter-row" id="filter-row">
+      <span class="tag selectable active" data-value="전체">전체</span>
+      <span class="tag selectable" data-value="LP">LP</span>
+      <span class="tag selectable" data-value="카세트">카세트</span>
+      <span class="tag selectable" data-value="의류">의류</span>
+      <span class="tag selectable" data-value="기타">기타</span>
+    </div>
+
+    <div class="item-list" id="item-list">
+      <div class="empty-state">불러오는 중...</div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="modal" style="display:none">
+  <div class="modal-sheet" id="modal-content"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const filterTags = document.querySelectorAll('#filter-row .tag');
+let currentCategory = '전체';
+const likedItems = new Set(JSON.parse(localStorage.getItem('liked_items') || '[]'));
+
+const params = new URLSearchParams(location.search);
+if (params.get('category')) {
+  currentCategory = params.get('category');
+}
+
+filterTags.forEach(tag => {
+  if (tag.dataset.value === currentCategory) tag.classList.add('active');
+  else tag.classList.remove('active');
+
+  tag.addEventListener('click', () => {
+    filterTags.forEach(t => t.classList.remove('active'));
+    tag.classList.add('active');
+    currentCategory = tag.dataset.value;
+    loadItems();
+  });
+});
+
+async function loadItems() {
+  const listEl = document.getElementById('item-list');
+  listEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
+
+  const url = currentCategory === '전체'
+    ? '/api/items'
+    : `/api/items?category=${encodeURIComponent(currentCategory)}`;
+
+  try {
+    const res = await fetch(url);
+    const items = await res.json();
+
+    if (items.length === 0) {
+      listEl.innerHTML = '<div class="empty-state">아직 등록된 상품이 없어요.<br>곧 새로운 물건이 올라올 거예요 👀</div>';
+      return;
+    }
+
+    listEl.innerHTML = items.map(renderItem).join('');
+
+    document.querySelectorAll('.item-card').forEach(card => {
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('.like-btn')) return;
+        openDetail(card.dataset.id, items);
+      });
+    });
+
+    document.querySelectorAll('.like-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleLike(btn.dataset.id, btn);
+      });
+    });
+  } catch (err) {
+    listEl.innerHTML = '<div class="empty-state">불러오지 못했어요. 새로고침 해주세요.</div>';
+  }
+}
+
+function renderItem(item) {
+  const liked = likedItems.has(item.id);
+  const soldBadge = item.status === 'sold_out' ? '<span class="sold-badge">품절</span>' : '';
+  return `
+    <div class="item-card" data-id="${item.id}">
+      <img class="item-thumb" src="${item.image_path}" alt="${escapeHtml(item.title)}" />
+      <div class="item-info">
+        <p class="title">${escapeHtml(item.title)}${soldBadge}</p>
+        <p class="meta">${item.price.toLocaleString()}원${item.booth_number ? ' · ' + item.booth_number + '번 부스' : ''}</p>
+      </div>
+      <button class="like-btn ${liked ? 'liked' : ''}" data-id="${item.id}">${liked ? '♥' : '♡'}</button>
+    </div>
+  `;
+}
+
+async function toggleLike(itemId, btn) {
+  const isLiked = likedItems.has(itemId);
+  const newLiked = !isLiked;
+
+  try {
+    await fetch(`/api/items/${itemId}/like`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ liked: newLiked })
+    });
+    if (newLiked) {
+      likedItems.add(itemId);
+      btn.classList.add('liked');
+      btn.textContent = '♥';
+    } else {
+      likedItems.delete(itemId);
+      btn.classList.remove('liked');
+      btn.textContent = '♡';
+    }
+    localStorage.setItem('liked_items', JSON.stringify([...likedItems]));
+  } catch (err) {
+    showToast('찜하기 실패');
+  }
+}
+
+function openDetail(itemId, items) {
+  const item = items.find(i => i.id === itemId);
+  if (!item) return;
+
+  const modal = document.getElementById('modal');
+  const content = document.getElementById('modal-content');
+  content.innerHTML = `
+    <img src="${item.image_path}" alt="${escapeHtml(item.title)}" />
+    <h3 style="margin:0 0 4px;">${escapeHtml(item.title)}</h3>
+    <p style="color:var(--muted); font-size:13px; margin:0 0 10px;">
+      ${item.seller_name}${item.booth_number ? ' · ' + item.booth_number + '번 부스' : ''}
+    </p>
+    <p style="font-size:20px; font-weight:700; margin:0 0 10px;">${item.price.toLocaleString()}원</p>
+    <p style="font-size:14px; color:var(--ink); margin:0 0 16px; line-height:1.5;">${escapeHtml(item.description || '')}</p>
+    ${item.contact_link
+      ? `<a href="https://${item.contact_link.replace(/^https?:\/\//,'')}" target="_blank" style="text-decoration:none;">
+          <button class="btn-primary">💬 셀러에게 연락하기</button>
+        </a>`
+      : `<p style="text-align:center; color:var(--muted); font-size:13px;">${item.booth_number ? item.booth_number + '번 부스에서 직접 만나보세요' : '현장에서 셀러를 찾아주세요'}</p>`
+    }
+    <button class="btn-outline" style="margin-top:8px;" onclick="closeDetail()">닫기</button>
+  `;
+  modal.style.display = 'flex';
+}
+
+function closeDetail() {
+  document.getElementById('modal').style.display = 'none';
+}
+
+document.getElementById('modal').addEventListener('click', (e) => {
+  if (e.target.id === 'modal') closeDetail();
+});
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str || '';
+  return div.innerHTML;
+}
+
+function showToast(msg) {
+  const toast = document.getElementById('toast');
+  toast.textContent = msg;
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 2000);
+}
+
+loadItems();
+</script>
+</body>
+</html>

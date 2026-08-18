@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+<title>셀러 등록 · Digging Market</title>
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+<div class="app">
+  <div class="top-nav">
+    <a href="/" class="back">←</a>
+    <h2 class="page-title">상품 등록</h2>
+  </div>
+
+  <div class="content">
+    <form id="sell-form">
+      <div class="upload-box" id="upload-box">
+        <div class="placeholder" id="upload-placeholder">
+          📷<br />사진 촬영 / 업로드
+        </div>
+        <img id="preview-img" style="display:none" />
+      </div>
+      <input type="file" id="image-input" accept="image/*" capture="environment" style="display:none" />
+
+      <div class="ai-badge" id="ai-badge" style="display:none">
+        <span id="ai-badge-text">✨ AI가 분석 중...</span>
+      </div>
+
+      <label>셀러 이름 / 부스명</label>
+      <input type="text" id="seller-name" placeholder="예: 민지의 레코드샵" required />
+
+      <label>부스 번호 (선택)</label>
+      <input type="text" id="booth-number" placeholder="예: 7" />
+
+      <label>카테고리</label>
+      <div class="tag-row" id="category-tags" style="margin-bottom:12px;">
+        <span class="tag selectable" data-value="LP">LP</span>
+        <span class="tag selectable" data-value="카세트">카세트</span>
+        <span class="tag selectable" data-value="의류">의류</span>
+        <span class="tag selectable" data-value="기타">기타</span>
+      </div>
+
+      <label>상품명</label>
+      <input type="text" id="title" placeholder="예: 비틀즈 Abbey Road" required />
+
+      <label>설명</label>
+      <textarea id="description" placeholder="상태, 특징 등을 적어주세요"></textarea>
+
+      <label>가격 (원)</label>
+      <input type="number" id="price" placeholder="예: 15000" required />
+
+      <label>연락처 링크 (선택 — 인스타 DM, 오픈채팅 등)</label>
+      <input type="text" id="contact-link" placeholder="예: instagram.com/아이디" />
+
+      <button type="submit" class="btn-primary" style="margin-top:8px;">등록하기</button>
+    </form>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const uploadBox = document.getElementById('upload-box');
+const imageInput = document.getElementById('image-input');
+const previewImg = document.getElementById('preview-img');
+const uploadPlaceholder = document.getElementById('upload-placeholder');
+const aiBadge = document.getElementById('ai-badge');
+const aiBadgeText = document.getElementById('ai-badge-text');
+const categoryTags = document.querySelectorAll('#category-tags .tag');
+let selectedCategory = null;
+let selectedFile = null;
+
+uploadBox.addEventListener('click', () => imageInput.click());
+
+categoryTags.forEach(tag => {
+  tag.addEventListener('click', () => {
+    categoryTags.forEach(t => t.classList.remove('active'));
+    tag.classList.add('active');
+    selectedCategory = tag.dataset.value;
+  });
+});
+
+imageInput.addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  selectedFile = file;
+
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    previewImg.src = ev.target.result;
+    previewImg.style.display = 'block';
+    uploadPlaceholder.style.display = 'none';
+  };
+  reader.readAsDataURL(file);
+
+  // AI 분석 요청
+  aiBadge.style.display = 'flex';
+  aiBadge.classList.add('loading');
+  aiBadgeText.textContent = '✨ AI가 카테고리·설명 초안 작성 중...';
+
+  try {
+    const formData = new FormData();
+    formData.append('image', file);
+    const res = await fetch('/api/analyze', { method: 'POST', body: formData });
+    const data = await res.json();
+
+    document.getElementById('title').value = data.title || '';
+    document.getElementById('description').value = data.description || '';
+
+    if (data.category) {
+      categoryTags.forEach(t => {
+        t.classList.toggle('active', t.dataset.value === data.category);
+      });
+      selectedCategory = data.category;
+    }
+    aiBadgeText.textContent = '✨ AI 초안이 채워졌어요. 확인 후 수정해주세요.';
+  } catch (err) {
+    aiBadgeText.textContent = '⚠️ AI 분석에 실패했어요. 직접 입력해주세요.';
+  } finally {
+    aiBadge.classList.remove('loading');
+  }
+});
+
+document.getElementById('sell-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+
+  if (!selectedFile) {
+    showToast('사진을 먼저 등록해주세요');
+    return;
+  }
+  if (!selectedCategory) {
+    showToast('카테고리를 선택해주세요');
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('image', selectedFile);
+  formData.append('seller_name', document.getElementById('seller-name').value);
+  formData.append('booth_number', document.getElementById('booth-number').value);
+  formData.append('category', selectedCategory);
+  formData.append('title', document.getElementById('title').value);
+  formData.append('description', document.getElementById('description').value);
+  formData.append('price', document.getElementById('price').value);
+  formData.append('contact_link', document.getElementById('contact-link').value);
+
+  try {
+    const res = await fetch('/api/items', { method: 'POST', body: formData });
+    if (!res.ok) throw new Error('등록 실패');
+    showToast('등록되었습니다!');
+    setTimeout(() => location.href = '/feed', 800);
+  } catch (err) {
+    showToast('등록 중 오류가 발생했어요');
+  }
+});
+
+function showToast(msg) {
+  const toast = document.getElementById('toast');
+  toast.textContent = msg;
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 2000);
+}
+</script>
+</body>
+</html>
