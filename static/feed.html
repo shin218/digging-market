@@ -28,6 +28,7 @@
       <span class="tag selectable" data-value="카세트">카세트</span>
       <span class="tag selectable" data-value="의류">의류</span>
       <span class="tag selectable" data-value="기타">기타</span>
+      <span class="tag selectable" id="liked-only-toggle">♡ 찜한 것만</span>
     </div>
 
     <div class="item-list" id="item-list">
@@ -43,8 +44,10 @@
 <div class="toast" id="toast"></div>
 
 <script>
-const filterTags = document.querySelectorAll('#filter-row .tag');
+const filterTags = document.querySelectorAll('#filter-row .tag[data-value]');
+const likedOnlyToggle = document.getElementById('liked-only-toggle');
 let currentCategory = '전체';
+let likedOnly = false;
 const likedItems = new Set(JSON.parse(localStorage.getItem('liked_items') || '[]'));
 
 const params = new URLSearchParams(location.search);
@@ -64,6 +67,13 @@ filterTags.forEach(tag => {
   });
 });
 
+likedOnlyToggle.addEventListener('click', () => {
+  likedOnly = !likedOnly;
+  likedOnlyToggle.classList.toggle('active', likedOnly);
+  likedOnlyToggle.textContent = likedOnly ? '♥ 찜한 것만' : '♡ 찜한 것만';
+  loadItems();
+});
+
 async function loadItems() {
   const listEl = document.getElementById('item-list');
   listEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
@@ -74,10 +84,16 @@ async function loadItems() {
 
   try {
     const res = await fetch(url);
-    const items = await res.json();
+    let items = await res.json();
+
+    if (likedOnly) {
+      items = items.filter(item => likedItems.has(item.id));
+    }
 
     if (items.length === 0) {
-      listEl.innerHTML = '<div class="empty-state">아직 등록된 상품이 없어요.<br>곧 새로운 물건이 올라올 거예요 👀</div>';
+      listEl.innerHTML = likedOnly
+        ? '<div class="empty-state">아직 찜한 상품이 없어요.<br>마음에 드는 물건에 하트를 눌러보세요 🤍</div>'
+        : '<div class="empty-state">아직 등록된 상품이 없어요.<br>곧 새로운 물건이 올라올 거예요 👀</div>';
       return;
     }
 
@@ -135,6 +151,13 @@ async function toggleLike(itemId, btn) {
       likedItems.delete(itemId);
       btn.classList.remove('liked');
       btn.textContent = '♡';
+      if (likedOnly) {
+        btn.closest('.item-card').remove();
+        if (document.querySelectorAll('#item-list .item-card').length === 0) {
+          document.getElementById('item-list').innerHTML =
+            '<div class="empty-state">아직 찜한 상품이 없어요.<br>마음에 드는 물건에 하트를 눌러보세요 🤍</div>';
+        }
+      }
     }
     localStorage.setItem('liked_items', JSON.stringify([...likedItems]));
   } catch (err) {
