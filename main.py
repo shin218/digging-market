@@ -17,9 +17,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 BASE_DIR = Path(__file__).parent
-DB_PATH = BASE_DIR / "digging_market.db"
-UPLOAD_DIR = BASE_DIR / "uploads"
-UPLOAD_DIR.mkdir(exist_ok=True)
+# DATA_DIR: Render에서 Persistent Disk를 마운트할 경로 (예: /var/data).
+# 환경변수가 없으면 로컬 개발 시 프로젝트 폴더를 그대로 사용.
+DATA_DIR = Path(os.environ.get("DATA_DIR", BASE_DIR))
+DB_PATH = DATA_DIR / "digging_market.db"
+UPLOAD_DIR = DATA_DIR / "uploads"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title="Digging Market API")
 

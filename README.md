@@ -35,9 +35,25 @@ export ANTHROPIC_API_KEY=sk-ant-...
 2. Render 대시보드 → New Web Service → 리포지토리 연결
 3. Build Command: `pip install -r requirements.txt`
 4. Start Command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
-5. (선택) Environment → `ANTHROPIC_API_KEY` 추가
-6. 행사 당일에는 Starter 플랜(월 $7)으로 잠깐 올려서 슬립모드(15분 비활성 시 대기) 방지 권장,
-   행사 끝나면 다시 Free로 내리면 됩니다.
+5. (선택) AI 분석 쓰실 거면 Environment → `ANTHROPIC_API_KEY` 추가
+6. 행사 당일에는 Starter 플랜(월 $7)으로 잠깐 올려서 슬립모드(15분 비활성 시 대기) 방지 권장
+
+### 중요: 데이터 유실 방지 (Persistent Disk 설정)
+
+Render는 기본적으로 파일시스템이 임시(ephemeral)라서, **디스크를 안 붙이면 재배포/재시작마다 DB와 업로드된 사진이 전부 사라집니다.**
+Starter 이상 플랜에서만 디스크를 붙일 수 있으니, 행사 기간에는 반드시 아래를 설정하세요.
+
+1. 서비스가 Starter 플랜인지 확인 (Free 플랜은 디스크 연결 불가)
+2. 서비스 페이지 → **Disks** 탭 → **Add Disk**
+3. Mount Path에 `/var/data` 입력, 용량은 1GB로 충분
+4. 서비스 → **Environment** 탭 → 환경변수 추가:
+   - Key: `DATA_DIR`
+   - Value: `/var/data`
+5. 저장하면 자동으로 재배포되고, 이후부터 DB(`digging_market.db`)와 업로드된 사진이 `/var/data`에 저장되어 재배포/재시작에도 유지됩니다
+
+`DATA_DIR`을 설정하지 않으면 (로컬 개발 시처럼) 프로젝트 폴더에 그대로 저장됩니다 — 로컬 테스트에는 영향 없습니다.
+
+행사 끝나면 Starter 플랜과 디스크를 다시 내리셔도 됩니다 (그 전에 대시보드에서 데이터 백업 권장 — DB 파일은 Shell에서 다운받거나, `/api/stats`, `/api/items` 응답을 미리 저장해두는 것도 방법입니다).
 
 ## 데이터
 
