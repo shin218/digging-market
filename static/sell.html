@@ -47,12 +47,7 @@
       </div>
 
       <label>카테고리</label>
-      <div class="tag-row" id="category-tags" style="margin-bottom:12px;">
-        <span class="tag selectable" data-value="LP">LP</span>
-        <span class="tag selectable" data-value="카세트">카세트</span>
-        <span class="tag selectable" data-value="의류">의류</span>
-        <span class="tag selectable" data-value="기타">기타</span>
-      </div>
+      <input type="text" id="category-input" placeholder="예: LP, 카세트, Y2K 의류 등 자유롭게 입력" style="margin-bottom:12px;" />
 
       <label>상품명</label>
       <input type="text" id="title" placeholder="예: 비틀즈 Abbey Road" required />
@@ -61,7 +56,7 @@
       <textarea id="description" placeholder="상태, 특징 등을 적어주세요"></textarea>
 
       <label>가격 (원)</label>
-      <input type="number" id="price" placeholder="예: 15000" required />
+      <input type="text" inputmode="numeric" id="price" placeholder="예: 15,000" />
 
       <button type="submit" class="btn-primary" style="margin-top:8px;">등록하기</button>
     </form>
@@ -80,8 +75,8 @@ const previewImg = document.getElementById('preview-img');
 const uploadPlaceholder = document.getElementById('upload-placeholder');
 const aiBadge = document.getElementById('ai-badge');
 const aiBadgeText = document.getElementById('ai-badge-text');
-const categoryTags = document.querySelectorAll('#category-tags .tag');
-let selectedCategory = null;
+const categoryInput = document.getElementById('category-input');
+const priceInput = document.getElementById('price');
 let selectedFile = null;
 
 let currentSeller = null;
@@ -106,10 +101,11 @@ async function verifySeller() {
 function renderSellerBadge() {
   const badge = document.getElementById('seller-badge');
   badge.innerHTML = `
-    <div style="display:flex; justify-content:space-between; align-items:center;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
       <span>👋 <strong>${escapeHtml(currentSeller.seller_name)}</strong>님, 환영해요${currentSeller.booth_number ? ' (부스 ' + currentSeller.booth_number + '번)' : ''}</span>
-      <button type="button" onclick="toggleEditForm(true)" style="width:auto; padding:4px 10px; font-size:11px; background:transparent; border:0.5px solid var(--border-strong); color:var(--ink);">정보 수정</button>
+      <button type="button" onclick="toggleEditForm(true)" style="width:auto; padding:4px 10px; font-size:11px; background:transparent; border:0.5px solid var(--border-strong); color:var(--ink); flex-shrink:0;">정보 수정</button>
     </div>
+    <a href="/my?token=${encodeURIComponent(token)}" style="font-size:12px; color:var(--brand); text-decoration:none;">📦 내가 등록한 상품 관리하기 →</a>
   `;
 }
 
@@ -148,13 +144,15 @@ async function saveSellerInfo() {
 
 uploadBox.addEventListener('click', () => imageInput.click());
 
-categoryTags.forEach(tag => {
-  tag.addEventListener('click', () => {
-    categoryTags.forEach(t => t.classList.remove('active'));
-    tag.classList.add('active');
-    selectedCategory = tag.dataset.value;
-  });
+// 가격 입력에 실시간 콤마 포맷 적용
+priceInput.addEventListener('input', () => {
+  const digitsOnly = priceInput.value.replace(/[^\d]/g, '');
+  priceInput.value = digitsOnly ? Number(digitsOnly).toLocaleString('ko-KR') : '';
 });
+
+function getRawPrice() {
+  return priceInput.value.replace(/[^\d]/g, '');
+}
 
 imageInput.addEventListener('change', async (e) => {
   const file = e.target.files[0];
@@ -181,12 +179,8 @@ imageInput.addEventListener('change', async (e) => {
 
     document.getElementById('title').value = data.title || '';
     document.getElementById('description').value = data.description || '';
-
     if (data.category) {
-      categoryTags.forEach(t => {
-        t.classList.toggle('active', t.dataset.value === data.category);
-      });
-      selectedCategory = data.category;
+      categoryInput.value = data.category;
     }
     aiBadgeText.textContent = '✨ AI 초안이 채워졌어요. 확인 후 수정해주세요.';
   } catch (err) {
@@ -203,18 +197,22 @@ document.getElementById('sell-form').addEventListener('submit', async (e) => {
     showToast('사진을 먼저 등록해주세요');
     return;
   }
-  if (!selectedCategory) {
-    showToast('카테고리를 선택해주세요');
+  if (!categoryInput.value.trim()) {
+    showToast('카테고리를 입력해주세요');
+    return;
+  }
+  if (!getRawPrice()) {
+    showToast('가격을 입력해주세요');
     return;
   }
 
   const formData = new FormData();
   formData.append('token', token);
   formData.append('image', selectedFile);
-  formData.append('category', selectedCategory);
+  formData.append('category', categoryInput.value.trim());
   formData.append('title', document.getElementById('title').value);
   formData.append('description', document.getElementById('description').value);
-  formData.append('price', document.getElementById('price').value);
+  formData.append('price', getRawPrice());
 
   try {
     const res = await fetch('/api/items', { method: 'POST', body: formData });

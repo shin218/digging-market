@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+<title>내 상품 관리 · Digging Market</title>
+<link rel="stylesheet" href="/static/style.css" />
+<style>
+  .status-select {
+    font-size: 12px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    border: 0.5px solid var(--border);
+    background: #fff;
+    color: var(--ink);
+  }
+  .item-manage-card {
+    background: #fff;
+    border: 0.5px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+    margin-bottom: 10px;
+  }
+  .item-manage-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+  .item-manage-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 10px;
+  }
+  .item-manage-actions button {
+    width: auto;
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+  .edit-item-form {
+    display: none;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 0.5px solid var(--border);
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="top-nav">
+    <a href="#" class="back" id="back-link">←</a>
+    <h2 class="page-title">내 상품 관리</h2>
+  </div>
+
+  <div class="content">
+    <div id="status-banner" style="font-size:13px; color:var(--muted); margin-bottom:12px;">확인 중...</div>
+    <div id="item-list"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const params = new URLSearchParams(location.search);
+const token = params.get('token');
+document.getElementById('back-link').href = `/sell?token=${encodeURIComponent(token || '')}`;
+
+async function loadMyItems() {
+  const banner = document.getElementById('status-banner');
+  const listEl = document.getElementById('item-list');
+
+  if (!token) {
+    banner.textContent = '⚠️ 접근 권한이 없어요. 셀러용 QR코드로 다시 접속해주세요.';
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/sellers/${encodeURIComponent(token)}/items`);
+    if (!res.ok) throw new Error('invalid token');
+    const items = await res.json();
+
+    if (items.length === 0) {
+      banner.textContent = '아직 등록한 상품이 없어요.';
+      listEl.innerHTML = '';
+      return;
+    }
+
+    banner.textContent = `총 ${items.length}개 등록됨`;
+    listEl.innerHTML = items.map(renderItemCard).join('');
+  } catch (err) {
+    banner.textContent = '⚠️ 접근 권한이 없어요. 셀러용 QR코드로 다시 접속해주세요.';
+  }
+}
+
+function statusLabel(status) {
+  if (status === 'sold_out') return '판매완료';
+  if (status === 'reserved') return '예약중';
+  return '판매중';
+}
+
+function renderItemCard(item) {
+  return `
+    <div class="item-manage-card" id="card-${item.id}">
+      <div class="item-manage-row">
+        <img class="item-thumb" src="${item.image_path}" alt="" />
+        <div style="flex:1; min-width:0;">
+          <p style="margin:0; font-weight:600; font-size:13px;">${escapeHtml(item.title)}</p>
+          <p style="margin:3px 0 0; font-size:12px; color:var(--muted);">${item.category} · ${Number(item.price).toLocaleString('ko-KR')}원</p>
+        </div>
+        <select class="status-select" onchange="changeStatus('${item.id}', this.value)">
+          <option value="available" ${item.status === 'available' ? 'selected' : ''}>판매중</option>
+          <option value="reserved" ${item.status === 'reserved' ? 'selected' : ''}>예약중</option>
+          <option value="sold_out" ${item.status === 'sold_out' ? 'selected' : ''}>판매완료</option>
+        </select>
+      </div>
+
+      <div class="item-manage-actions">
+        <button class="btn-outline" onclick="toggleEdit('${item.id}')">수정</button>
+        <button class="btn-outline" style="color:var(--danger); border-color:var(--danger);" onclick="deleteItem('${item.id}', '${escapeHtml(item.title)}')">삭제</button>
+      </div>
+
+      <div class="edit-item-form" id="edit-${item.id}">
+        <label>카테고리</label>
+        <input type="text" id="edit-category-${item.id}" value="${escapeAttr(item.category)}" />
+        <label>상품명</label>
+        <input type="text" id="edit-title-${item.id}" value="${escapeAttr(item.title)}" />
+        <label>설명</label>
+        <textarea id="edit-desc-${item.id}">${escapeHtml(item.description || '')}</textarea>
+        <label>가격 (원)</label>
+        <input type="text" inputmode="numeric" id="edit-price-${item.id}" value="${Number(item.price).toLocaleString('ko-KR')}" oninput="formatPriceInput(this)" />
+        <div style="display:flex; gap:8px; margin-top:8px;">
+          <button class="btn-outline" style="flex:1;" onclick="toggleEdit('${item.id}')">취소</button>
+          <button class="btn-primary" style="flex:1;" onclick="saveEdit('${item.id}')">저장</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function formatPriceInput(el) {
+  const digits = el.value.replace(/[^\d]/g, '');
+  el.value = digits ? Number(digits).toLocaleString('ko-KR') : '';
+}
+
+function toggleEdit(itemId) {
+  const form = document.getElementById(`edit-${itemId}`);
+  form.style.display = form.style.display === 'block' ? 'none' : 'block';
+}
+
+async function changeStatus(itemId, status) {
+  try {
+    const res = await fetch(`/api/items/${itemId}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, status })
+    });
+    if (!res.ok) throw new Error('실패');
+    showToast('상태가 변경됐어요');
+  } catch (err) {
+    showToast('상태 변경 중 오류가 발생했어요');
+    loadMyItems();
+  }
+}
+
+async function saveEdit(itemId) {
+  const category = document.getElementById(`edit-category-${itemId}`).value.trim();
+  const title = document.getElementById(`edit-title-${itemId}`).value.trim();
+  const description = document.getElementById(`edit-desc-${itemId}`).value.trim();
+  const priceRaw = document.getElementById(`edit-price-${itemId}`).value.replace(/[^\d]/g, '');
+
+  if (!category || !title || !priceRaw) {
+    showToast('필수 항목을 입력해주세요');
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/items/${itemId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, category, title, description, price: Number(priceRaw) })
+    });
+    if (!res.ok) throw new Error('실패');
+    showToast('수정됐어요');
+    loadMyItems();
+  } catch (err) {
+    showToast('수정 중 오류가 발생했어요');
+  }
+}
+
+async function deleteItem(itemId, title) {
+  if (!confirm(`"${title}" 상품을 삭제할까요? 되돌릴 수 없어요.`)) return;
+
+  try {
+    const res = await fetch(`/api/items/${itemId}?token=${encodeURIComponent(token)}`, {
+      method: 'DELETE'
+    });
+    if (!res.ok) throw new Error('실패');
+    showToast('삭제됐어요');
+    document.getElementById(`card-${itemId}`).remove();
+  } catch (err) {
+    showToast('삭제 중 오류가 발생했어요');
+  }
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str || '';
+  return div.innerHTML;
+}
+
+function escapeAttr(str) {
+  return (str || '').replace(/"/g, '&quot;');
+}
+
+function showToast(msg) {
+  const toast = document.getElementById('toast');
+  toast.textContent = msg;
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 2000);
+}
+
+loadMyItems();
+</script>
+</body>
+</html>

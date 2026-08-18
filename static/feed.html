@@ -96,11 +96,12 @@ async function loadItems() {
 function renderItem(item) {
   const liked = likedItems.has(item.id);
   const soldBadge = item.status === 'sold_out' ? '<span class="sold-badge">품절</span>' : '';
+  const reservedBadge = item.status === 'reserved' ? '<span class="sold-badge" style="background:#c9a15a;">예약중</span>' : '';
   return `
     <div class="item-card" data-id="${item.id}">
       <img class="item-thumb" src="${item.image_path}" alt="${escapeHtml(item.title)}" />
       <div class="item-info">
-        <p class="title">${escapeHtml(item.title)}${soldBadge}</p>
+        <p class="title">${escapeHtml(item.title)}${soldBadge}${reservedBadge}</p>
         <p class="meta">${item.price.toLocaleString()}원${item.booth_number ? ' · ' + item.booth_number + '번 부스' : ''}</p>
       </div>
       <button class="like-btn ${liked ? 'liked' : ''}" data-id="${item.id}">${liked ? '♥' : '♡'}</button>

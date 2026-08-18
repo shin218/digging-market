@@ -49,6 +49,7 @@ def init_db():
         """
         CREATE TABLE IF NOT EXISTS items (
             id TEXT PRIMARY KEY,
+            seller_token TEXT NOT NULL,
             seller_name TEXT NOT NULL,
             booth_number TEXT,
             category TEXT NOT NULL,
@@ -305,11 +306,12 @@ async def create_item(
     conn.execute(
         """
         INSERT INTO items
-        (id, seller_name, booth_number, category, title, description, price, image_path, contact_link)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, seller_token, seller_name, booth_number, category, title, description, price, image_path, contact_link)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             item_id,
+            token,
             seller_name,
             booth_number,
             category,
@@ -371,39 +373,85 @@ def toggle_like(item_id: str, payload: LikeToggle):
     return {"likes": row["likes"]}
 
 
-@app.patch("/api/items/{item_id}/status")
-def update_status(item_id: str, status: str = Form(...)):
-    if status not in ("available", "sold_out"):
-        raise HTTPException(status_code=400, detail="잘못된 상태값입니다")
+def check_item_ownership(item_id: str, token: str) -> dict:
     conn = get_db()
-    conn.execute("UPDATE items SET status = ? WHERE id = ?", (status, item_id))
+    row = conn.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="상품을 찾을 수 없습니다")
+    item = dict(row)
+    if item["seller_token"] != token:
+        raise HTTPException(status_code=403, detail="본인이 등록한 상품만 관리할 수 있어요")
+    return item
+
+
+class ItemStatusUpdate(BaseModel):
+    token: str
+    status: str  # available | reserved | sold_out
+
+
+@app.patch("/api/items/{item_id}/status")
+def update_status(item_id: str, payload: ItemStatusUpdate):
+    if payload.status not in ("available", "reserved", "sold_out"):
+        raise HTTPException(status_code=400, detail="잘못된 상태값입니다")
+    check_item_ownership(item_id, payload.token)
+    conn = get_db()
+    conn.execute("UPDATE items SET status = ? WHERE id = ?", (payload.status, item_id))
     conn.commit()
     conn.close()
-    return {"status": status}
+    return {"status": payload.status}
 
 
-# ---------------------------------------------------------------------------
-# 셀러 대시보드용 집계
-# ---------------------------------------------------------------------------
-@app.get("/api/sellers/{seller_name}/items")
-def seller_items(seller_name: str):
+class ItemUpdate(BaseModel):
+    token: str
+    category: str
+    title: str
+    description: str = ""
+    price: int
+
+
+@app.patch("/api/items/{item_id}")
+def edit_item(item_id: str, payload: ItemUpdate):
+    check_item_ownership(item_id, payload.token)
+    conn = get_db()
+    conn.execute(
+        "UPDATE items SET category = ?, title = ?, description = ?, price = ? WHERE id = ?",
+        (payload.category, payload.title, payload.description, payload.price, item_id),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+    conn.close()
+    return dict(row)
+
+
+@app.delete("/api/items/{item_id}")
+def delete_item(item_id: str, token: str):
+    item = check_item_ownership(item_id, token)
+    conn = get_db()
+    conn.execute("DELETE FROM items WHERE id = ?", (item_id,))
+    conn.commit()
+    conn.close()
+    # 업로드된 이미지 파일도 같이 정리
+    try:
+        img_path = UPLOAD_DIR / Path(item["image_path"]).name
+        if img_path.exists():
+            img_path.unlink()
+    except Exception:
+        pass
+    return {"message": "삭제되었습니다"}
+
+
+@app.get("/api/sellers/{token}/items")
+def my_items(token: str):
+    """셀러 본인 토큰으로 본인이 등록한 상품 목록 조회"""
+    if not get_seller_by_token(token):
+        raise HTTPException(status_code=403, detail="유효하지 않은 셀러 토큰입니다")
     conn = get_db()
     rows = conn.execute(
-        "SELECT * FROM items WHERE seller_name = ? ORDER BY created_at DESC",
-        (seller_name,),
+        "SELECT * FROM items WHERE seller_token = ? ORDER BY created_at DESC", (token,)
     ).fetchall()
     conn.close()
-    items = [dict(row) for row in rows]
-    total = len(items)
-    sold = len([i for i in items if i["status"] == "sold_out"])
-    return {
-        "items": items,
-        "summary": {
-            "total": total,
-            "sold_out": sold,
-            "sell_through_rate": round(sold / total * 100, 1) if total else 0,
-        },
-    }
+    return [dict(row) for row in rows]
 
 
 # ---------------------------------------------------------------------------
@@ -485,3 +533,8 @@ def serve_dashboard():
 @app.get("/admin")
 def serve_admin():
     return FileResponse(str(BASE_DIR / "static" / "admin.html"))
+
+
+@app.get("/my")
+def serve_my():
+    return FileResponse(str(BASE_DIR / "static" / "my.html"))
