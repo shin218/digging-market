@@ -55,7 +55,9 @@
       </div>
 
       <label>카테고리</label>
-      <input type="text" id="category-input" placeholder="예: LP, 카세트, Y2K 의류 등 자유롭게 입력" style="margin-bottom:12px;" />
+      <select id="category-select" style="width:100%; margin-bottom:12px; padding:10px 12px; border-radius:var(--radius-sm); border:0.5px solid var(--border); font-size:14px; background:#fff; color:var(--ink);">
+        <option value="">불러오는 중...</option>
+      </select>
 
       <label>상품명</label>
       <input type="text" id="title" placeholder="예: 비틀즈 Abbey Road" required />
@@ -83,9 +85,26 @@ const previewImg = document.getElementById('preview-img');
 const uploadPlaceholder = document.getElementById('upload-placeholder');
 const aiBadge = document.getElementById('ai-badge');
 const aiBadgeText = document.getElementById('ai-badge-text');
-const categoryInput = document.getElementById('category-input');
+const categorySelect = document.getElementById('category-select');
 const priceInput = document.getElementById('price');
 let selectedFile = null;
+let availableCategories = [];
+
+async function loadCategoryOptions() {
+  try {
+    const res = await fetch('/api/categories');
+    availableCategories = await res.json();
+    if (availableCategories.length === 0) {
+      categorySelect.innerHTML = '<option value="">등록된 카테고리가 없어요</option>';
+      return;
+    }
+    categorySelect.innerHTML =
+      '<option value="">카테고리를 선택해주세요</option>' +
+      availableCategories.map(c => `<option value="${escapeHtml(c.name)}">${c.icon} ${escapeHtml(c.name)}</option>`).join('');
+  } catch (err) {
+    categorySelect.innerHTML = '<option value="">카테고리를 불러오지 못했어요</option>';
+  }
+}
 
 let currentSeller = null;
 
@@ -188,7 +207,10 @@ imageInput.addEventListener('change', async (e) => {
     document.getElementById('title').value = data.title || '';
     document.getElementById('description').value = data.description || '';
     if (data.category) {
-      categoryInput.value = data.category;
+      const matched = availableCategories.find(c => c.name === data.category);
+      if (matched) {
+        categorySelect.value = matched.name;
+      }
     }
     aiBadgeText.textContent = '✨ AI 초안이 채워졌어요. 확인 후 수정해주세요.';
   } catch (err) {
@@ -205,8 +227,8 @@ document.getElementById('sell-form').addEventListener('submit', async (e) => {
     showToast('사진을 먼저 등록해주세요');
     return;
   }
-  if (!categoryInput.value.trim()) {
-    showToast('카테고리를 입력해주세요');
+  if (!categorySelect.value) {
+    showToast('카테고리를 선택해주세요');
     return;
   }
   if (!getRawPrice()) {
@@ -217,7 +239,7 @@ document.getElementById('sell-form').addEventListener('submit', async (e) => {
   const formData = new FormData();
   formData.append('token', token);
   formData.append('image', selectedFile);
-  formData.append('category', categoryInput.value.trim());
+  formData.append('category', categorySelect.value);
   formData.append('title', document.getElementById('title').value);
   formData.append('description', document.getElementById('description').value);
   formData.append('price', getRawPrice());
@@ -246,6 +268,7 @@ function showToast(msg) {
 }
 
 verifySeller();
+loadCategoryOptions();
 </script>
 </body>
 </html>

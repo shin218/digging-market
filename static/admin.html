@@ -19,30 +19,67 @@
 <div class="app" style="max-width: 600px;">
   <div class="top-nav">
     <a href="/" class="back">←</a>
-    <h2 class="page-title">셀러 관리 (관리자용)</h2>
+    <h2 class="page-title">관리자</h2>
   </div>
 
   <div class="content">
-    <p style="font-size: 13px; color: var(--muted); margin: 0 0 16px;">
-      셀러를 등록하면 전용 QR코드가 생성돼요. 이 QR을 셀러에게 인쇄해서 나눠주세요.
-      이 페이지 링크는 셀러/방문객에게 공유하지 마세요.
-    </p>
+    <div class="tag-row" style="margin-bottom:16px;">
+      <span class="tag selectable active" id="tab-sellers" onclick="switchTab('sellers')">셀러 관리</span>
+      <span class="tag selectable" id="tab-categories" onclick="switchTab('categories')">카테고리 관리</span>
+    </div>
 
-    <form id="seller-form" style="margin-bottom: 24px;">
-      <label>셀러 이름 / 부스명</label>
-      <input type="text" id="seller-name" placeholder="예: 민지의 레코드샵" required />
+    <div id="panel-sellers">
+      <p style="font-size: 13px; color: var(--muted); margin: 0 0 16px;">
+        셀러를 등록하면 전용 QR코드가 생성돼요. 이 QR을 셀러에게 인쇄해서 나눠주세요.
+        이 페이지 링크는 셀러/방문객에게 공유하지 마세요.
+      </p>
 
-      <label>부스 번호</label>
-      <input type="text" id="booth-number" placeholder="예: 7" />
+      <form id="seller-form" style="margin-bottom: 24px;">
+        <label>셀러 이름 / 부스명</label>
+        <input type="text" id="seller-name" placeholder="예: 민지의 레코드샵" required />
 
-      <label>연락처 링크 (인스타 등)</label>
-      <input type="text" id="contact-link" placeholder="예: instagram.com/아이디" />
+        <label>부스 번호</label>
+        <input type="text" id="booth-number" placeholder="예: 7" />
 
-      <button type="submit" class="btn-primary">셀러 등록 + QR 발급</button>
-    </form>
+        <label>연락처 링크 (인스타 등)</label>
+        <input type="text" id="contact-link" placeholder="예: instagram.com/아이디" />
 
-    <p class="section-title" style="margin-top:0;">등록된 셀러 목록</p>
-    <div id="seller-list"></div>
+        <button type="submit" class="btn-primary">셀러 등록 + QR 발급</button>
+      </form>
+
+      <p class="section-title" style="margin-top:0;">등록된 셀러 목록</p>
+      <div id="seller-list"></div>
+    </div>
+
+    <div id="panel-categories" style="display:none;">
+      <p style="font-size: 13px; color: var(--muted); margin: 0 0 16px;">
+        여기서 등록한 카테고리가 메인 페이지, 상품 구경하기, 셀러 상품 등록 화면에 그대로 반영돼요.
+      </p>
+
+      <form id="category-form" style="margin-bottom: 20px;">
+        <label>아이콘 (이모지 하나)</label>
+        <div class="tag-row" id="icon-presets" style="margin-bottom:8px;">
+          <span class="tag selectable" data-icon="💿">💿</span>
+          <span class="tag selectable" data-icon="📼">📼</span>
+          <span class="tag selectable" data-icon="👕">👕</span>
+          <span class="tag selectable" data-icon="👟">👟</span>
+          <span class="tag selectable" data-icon="👜">👜</span>
+          <span class="tag selectable" data-icon="💎">💎</span>
+          <span class="tag selectable" data-icon="📚">📚</span>
+          <span class="tag selectable" data-icon="🎨">🎨</span>
+          <span class="tag selectable" data-icon="📦">📦</span>
+        </div>
+        <input type="text" id="category-icon" placeholder="위에서 고르거나 직접 이모지 입력" maxlength="4" required />
+
+        <label>카테고리 이름</label>
+        <input type="text" id="category-name" placeholder="예: 필름카메라" required />
+
+        <button type="submit" class="btn-primary">카테고리 추가</button>
+      </form>
+
+      <p class="section-title" style="margin-top:0;">등록된 카테고리</p>
+      <div id="category-list"></div>
+    </div>
   </div>
 </div>
 
@@ -50,6 +87,15 @@
 
 <script>
 const BASE_URL = window.location.origin;
+
+function switchTab(tab) {
+  const isSellers = tab === 'sellers';
+  document.getElementById('tab-sellers').classList.toggle('active', isSellers);
+  document.getElementById('tab-categories').classList.toggle('active', !isSellers);
+  document.getElementById('panel-sellers').style.display = isSellers ? 'block' : 'none';
+  document.getElementById('panel-categories').style.display = isSellers ? 'none' : 'block';
+  if (!isSellers) loadCategories();
+}
 
 document.getElementById('seller-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -105,6 +151,75 @@ async function loadSellers() {
 function copyLink(token) {
   navigator.clipboard.writeText(`${BASE_URL}/sell?token=${token}`);
   showToast('링크가 복사됐어요');
+}
+
+// ---------------- 카테고리 관리 ----------------
+document.querySelectorAll('#icon-presets .tag').forEach(tag => {
+  tag.addEventListener('click', () => {
+    document.querySelectorAll('#icon-presets .tag').forEach(t => t.classList.remove('active'));
+    tag.classList.add('active');
+    document.getElementById('category-icon').value = tag.dataset.icon;
+  });
+});
+
+document.getElementById('category-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const payload = {
+    name: document.getElementById('category-name').value.trim(),
+    icon: document.getElementById('category-icon').value.trim(),
+  };
+  if (!payload.name || !payload.icon) {
+    showToast('아이콘과 이름을 모두 입력해주세요');
+    return;
+  }
+  const res = await fetch('/api/admin/categories', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (res.ok) {
+    document.getElementById('category-form').reset();
+    document.querySelectorAll('#icon-presets .tag').forEach(t => t.classList.remove('active'));
+    showToast('카테고리가 추가됐어요');
+    loadCategories();
+  } else {
+    const err = await res.json();
+    showToast(err.detail || '추가 실패');
+  }
+});
+
+async function loadCategories() {
+  const res = await fetch('/api/categories');
+  const categories = await res.json();
+  const listEl = document.getElementById('category-list');
+
+  if (categories.length === 0) {
+    listEl.innerHTML = '<div class="empty-state">아직 등록된 카테고리가 없어요.</div>';
+    return;
+  }
+
+  listEl.innerHTML = categories.map(c => `
+    <div style="background:#fff; border:0.5px solid var(--border); border-radius:var(--radius-sm); padding:12px 14px; margin-bottom:8px; display:flex; align-items:center; gap:10px;">
+      <span style="font-size:22px;">${c.icon}</span>
+      <span style="flex:1; font-size:14px; font-weight:600;">${escapeHtml(c.name)}</span>
+      ${c.name === '기타'
+        ? '<span style="font-size:11px; color:var(--muted);">기본값 (삭제 불가)</span>'
+        : `<button class="btn-outline" style="width:auto; padding:6px 10px; font-size:12px; color:var(--danger); border-color:var(--danger);" onclick="deleteCategory('${c.id}', '${escapeHtml(c.name)}')">삭제</button>`
+      }
+    </div>
+  `).join('');
+}
+
+async function deleteCategory(id, name) {
+  if (!confirm(`"${name}" 카테고리를 삭제할까요?\n이 카테고리로 등록된 상품은 자동으로 '기타'로 이동해요.`)) return;
+  const res = await fetch(`/api/admin/categories/${id}`, { method: 'DELETE' });
+  if (res.ok) {
+    showToast('삭제됐어요');
+    loadCategories();
+  } else {
+    const err = await res.json();
+    showToast(err.detail || '삭제 실패');
+  }
 }
 
 function escapeHtml(str) {

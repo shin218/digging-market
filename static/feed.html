@@ -24,10 +24,7 @@
   <div class="content">
     <div class="filter-row" id="filter-row">
       <span class="tag selectable active" data-value="전체">전체</span>
-      <span class="tag selectable" data-value="LP">LP</span>
-      <span class="tag selectable" data-value="카세트">카세트</span>
-      <span class="tag selectable" data-value="의류">의류</span>
-      <span class="tag selectable" data-value="기타">기타</span>
+      <span id="category-filter-slot"></span>
       <span class="tag selectable" id="liked-only-toggle">♡ 찜한 것만</span>
     </div>
 
@@ -44,8 +41,8 @@
 <div class="toast" id="toast"></div>
 
 <script>
-const filterTags = document.querySelectorAll('#filter-row .tag[data-value]');
 const likedOnlyToggle = document.getElementById('liked-only-toggle');
+const categoryFilterSlot = document.getElementById('category-filter-slot');
 let currentCategory = '전체';
 let likedOnly = false;
 const likedItems = new Set(JSON.parse(localStorage.getItem('liked_items') || '[]'));
@@ -55,17 +52,31 @@ if (params.get('category')) {
   currentCategory = params.get('category');
 }
 
-filterTags.forEach(tag => {
-  if (tag.dataset.value === currentCategory) tag.classList.add('active');
-  else tag.classList.remove('active');
+async function loadCategoryFilters() {
+  try {
+    const res = await fetch('/api/categories');
+    const categories = await res.json();
+    categoryFilterSlot.innerHTML = categories.map(c =>
+      `<span class="tag selectable" data-value="${escapeHtml(c.name)}">${c.icon} ${escapeHtml(c.name)}</span>`
+    ).join('');
+  } catch (err) {
+    categoryFilterSlot.innerHTML = '';
+  }
+  bindFilterTags();
+}
 
-  tag.addEventListener('click', () => {
-    filterTags.forEach(t => t.classList.remove('active'));
-    tag.classList.add('active');
-    currentCategory = tag.dataset.value;
-    loadItems();
+function bindFilterTags() {
+  const allTags = document.querySelectorAll('#filter-row .tag[data-value]');
+  allTags.forEach(tag => {
+    tag.classList.toggle('active', tag.dataset.value === currentCategory);
+    tag.addEventListener('click', () => {
+      allTags.forEach(t => t.classList.remove('active'));
+      tag.classList.add('active');
+      currentCategory = tag.dataset.value;
+      loadItems();
+    });
   });
-});
+}
 
 likedOnlyToggle.addEventListener('click', () => {
   likedOnly = !likedOnly;
@@ -211,6 +222,7 @@ function showToast(msg) {
   setTimeout(() => toast.classList.remove('show'), 2000);
 }
 
+loadCategoryFilters();
 loadItems();
 </script>
 </body>

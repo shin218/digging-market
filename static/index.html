@@ -48,18 +48,39 @@
     </p>
 
     <p class="section-title">카테고리별로 보기</p>
-    <div class="category-grid">
-      <div class="category-cell" onclick="location.href='/feed?category=LP'">
-        <div>💿</div><span>LP</span>
-      </div>
-      <div class="category-cell" onclick="location.href='/feed?category=카세트'">
-        <div>📼</div><span>카세트</span>
-      </div>
-      <div class="category-cell" onclick="location.href='/feed?category=의류'">
-        <div>👕</div><span>의류</span>
-      </div>
+    <div class="category-grid" id="category-grid">
+      <div class="empty-state" style="grid-column: 1 / -1; padding: 12px;">불러오는 중...</div>
     </div>
   </div>
 </div>
+
+<script>
+async function loadCategoryGrid() {
+  const grid = document.getElementById('category-grid');
+  try {
+    const res = await fetch('/api/categories');
+    const categories = await res.json();
+    if (categories.length === 0) {
+      grid.innerHTML = '<div class="empty-state" style="grid-column: 1 / -1;">아직 카테고리가 없어요.</div>';
+      return;
+    }
+    grid.innerHTML = categories.map(c => `
+      <div class="category-cell" onclick="location.href='/feed?category=${encodeURIComponent(c.name)}'">
+        <div>${c.icon}</div><span>${escapeHtml(c.name)}</span>
+      </div>
+    `).join('');
+  } catch (err) {
+    grid.innerHTML = '<div class="empty-state" style="grid-column: 1 / -1;">불러오지 못했어요.</div>';
+  }
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str || '';
+  return div.innerHTML;
+}
+
+loadCategoryGrid();
+</script>
 </body>
 </html>

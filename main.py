@@ -88,6 +88,30 @@ def init_db():
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS categories (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            icon TEXT NOT NULL DEFAULT '📦',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    # 기존에 하드코딩되어 있던 카테고리를 초기값으로 시드 (최초 1회만)
+    existing = conn.execute("SELECT COUNT(*) c FROM categories").fetchone()["c"]
+    if existing == 0:
+        default_categories = [
+            ("LP", "💿"),
+            ("카세트", "📼"),
+            ("의류", "👕"),
+            ("기타", "📦"),
+        ]
+        for name, icon in default_categories:
+            conn.execute(
+                "INSERT INTO categories (id, name, icon) VALUES (?, ?, ?)",
+                (str(uuid.uuid4())[:8], name, icon),
+            )
     conn.commit()
     conn.close()
 
@@ -191,6 +215,65 @@ class FeedbackIn(BaseModel):
     interest_category: Optional[str] = None
     revisit_intent: Optional[int] = None
     comment: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# 카테고리 관리 — admin이 관리하고, 랜딩/피드/셀러등록/내상품관리가 여기서 끌어옴
+# ---------------------------------------------------------------------------
+@app.get("/api/categories")
+def list_categories():
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM categories ORDER BY created_at ASC").fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+class CategoryCreate(BaseModel):
+    name: str
+    icon: str = "📦"
+
+
+@app.post("/api/admin/categories")
+def create_category(payload: CategoryCreate):
+    name = payload.name.strip()
+    icon = payload.icon.strip() or "📦"
+    if not name:
+        raise HTTPException(status_code=400, detail="카테고리 이름을 입력해주세요")
+    conn = get_db()
+    existing = conn.execute("SELECT id FROM categories WHERE name = ?", (name,)).fetchone()
+    if existing:
+        conn.close()
+        raise HTTPException(status_code=400, detail="이미 있는 카테고리예요")
+    cat_id = str(uuid.uuid4())[:8]
+    conn.execute(
+        "INSERT INTO categories (id, name, icon) VALUES (?, ?, ?)", (cat_id, name, icon)
+    )
+    conn.commit()
+    conn.close()
+    return {"id": cat_id, "name": name, "icon": icon}
+
+
+@app.delete("/api/admin/categories/{category_id}")
+def delete_category(category_id: str):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM categories WHERE id = ?", (category_id,)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="카테고리를 찾을 수 없어요")
+
+    category = dict(row)
+    if category["name"] == "기타":
+        conn.close()
+        raise HTTPException(
+            status_code=400, detail="'기타' 카테고리는 삭제할 수 없어요 (삭제된 카테고리의 기본값으로 쓰여요)"
+        )
+
+    # 이 카테고리를 쓰던 기존 상품들은 '기타'로 재할당
+    conn.execute("UPDATE items SET category = '기타' WHERE category = ?", (category["name"],))
+    conn.execute("DELETE FROM categories WHERE id = ?", (category_id,))
+    conn.commit()
+    conn.close()
+    return {"message": "삭제되었어요. 이 카테고리로 등록됐던 상품은 '기타'로 이동됐어요."}
 
 
 # ---------------------------------------------------------------------------
