@@ -121,20 +121,15 @@ init_db()
 
 # ---------------------------------------------------------------------------
 # AI 이미지 분석 (Claude Vision) — ANTHROPIC_API_KEY 환경변수 필요
-# 키가 없으면 규칙 기반 폴백으로 동작 (데모/오프라인 대비)
+# 키가 없거나 호출 실패 시 빈 값으로 폴백 (셀러가 직접 입력)
 # ---------------------------------------------------------------------------
-CATEGORY_KEYWORDS = {
-    "LP": ["lp", "vinyl", "레코드", "바이닐", "앨범"],
-    "카세트": ["cassette", "카세트", "테이프"],
-    "의류": ["shirt", "top", "jacket", "니트", "자켓", "옷", "티셔츠"],
-}
 
 
 def analyze_image_with_ai(image_bytes: bytes, filename: str) -> dict:
     """
     이미지를 분석해 카테고리/제목/설명 초안을 생성한다.
     ANTHROPIC_API_KEY가 설정되어 있으면 Claude Vision을 사용하고,
-    없으면 파일명 기반의 단순 규칙으로 폴백한다 (개발/데모용).
+    없거나 호출에 실패하면 빈 값으로 폴백한다 (셀러가 직접 채우면 됨).
     """
     api_key = os.environ.get("ANTHROPIC_API_KEY")
 
@@ -148,16 +143,24 @@ def analyze_image_with_ai(image_bytes: bytes, filename: str) -> dict:
             if filename.lower().endswith(".png"):
                 media_type = "image/png"
 
+            conn = get_db()
+            category_names = [
+                row["name"]
+                for row in conn.execute("SELECT name FROM categories ORDER BY created_at ASC").fetchall()
+            ]
+            conn.close()
+            category_list = ", ".join(category_names) if category_names else "기타"
+
             prompt = (
                 "이 사진은 플리마켓에서 판매할 중고 물건입니다. "
                 "다음 JSON 형식으로만 답하세요 (다른 텍스트 없이):\n"
-                '{"category": "LP|카세트|의류|기타 중 하나", '
+                f'{{"category": "다음 중 하나: {category_list}", '
                 '"title": "짧은 상품명", '
                 '"description": "상태와 특징을 담은 한 줄 설명 (30자 이내)"}'
             )
 
             message = client.messages.create(
-                model="claude-sonnet-4-5",
+                model="claude-sonnet-5",
                 max_tokens=300,
                 messages=[
                     {
@@ -181,25 +184,21 @@ def analyze_image_with_ai(image_bytes: bytes, filename: str) -> dict:
             text = text.replace("```json", "").replace("```", "").strip()
             result = json.loads(text)
             return {
-                "category": result.get("category", "기타"),
-                "title": result.get("title", "제목 미정"),
+                "category": result.get("category", ""),
+                "title": result.get("title", ""),
                 "description": result.get("description", ""),
+                "ai_used": True,
             }
         except Exception as e:
-            # AI 호출 실패 시 폴백으로 진행
-            print(f"[AI 분석 실패, 폴백 사용] {e}")
+            # AI 호출 실패는 서버 로그에 명확히 남김 (Render Logs 탭에서 확인 가능)
+            print(f"[AI 분석 실패] {type(e).__name__}: {e}", flush=True)
 
-    # ------------------- 폴백 (규칙 기반) -------------------
-    lower_name = filename.lower()
-    category = "기타"
-    for cat, keywords in CATEGORY_KEYWORDS.items():
-        if any(kw in lower_name for kw in keywords):
-            category = cat
-            break
+    # ------------------- 폴백 (AI 미설정/실패 시 — 빈 값으로 셀러가 직접 입력) -------------------
     return {
-        "category": category,
-        "title": "새 상품 (제목을 입력해주세요)",
-        "description": "AI 자동 분석을 사용하려면 서버에 ANTHROPIC_API_KEY를 설정하세요.",
+        "category": "",
+        "title": "",
+        "description": "",
+        "ai_used": False,
     }
 
 

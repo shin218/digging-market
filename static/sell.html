@@ -212,7 +212,9 @@ imageInput.addEventListener('change', async (e) => {
         categorySelect.value = matched.name;
       }
     }
-    aiBadgeText.textContent = '✨ AI 초안이 채워졌어요. 확인 후 수정해주세요.';
+    aiBadgeText.textContent = data.ai_used
+      ? '✨ AI 초안이 채워졌어요. 확인 후 수정해주세요.'
+      : '📝 AI 분석을 사용할 수 없어요. 아래 정보를 직접 입력해주세요.';
   } catch (err) {
     aiBadgeText.textContent = '⚠️ AI 분석에 실패했어요. 직접 입력해주세요.';
   } finally {
