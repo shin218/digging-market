@@ -191,7 +191,7 @@ function openDetail(itemId, items) {
     <p style="font-size:20px; font-weight:700; margin:0 0 10px;">${item.price.toLocaleString()}원</p>
     <p style="font-size:14px; color:var(--ink); margin:0 0 16px; line-height:1.5;">${escapeHtml(item.description || '')}</p>
     ${item.contact_link
-      ? `<a href="https://${item.contact_link.replace(/^https?:\/\//,'')}" target="_blank" style="text-decoration:none;">
+      ? `<a href="https://instagram.com/${item.contact_link}" target="_blank" style="text-decoration:none;">
           <button class="btn-primary">💬 셀러에게 연락하기</button>
         </a>`
       : `<p style="text-align:center; color:var(--muted); font-size:13px;">${item.booth_number ? item.booth_number + '번 부스에서 직접 만나보세요' : '현장에서 셀러를 찾아주세요'}</p>`

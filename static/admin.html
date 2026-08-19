@@ -41,8 +41,16 @@
         <label>부스 번호</label>
         <input type="text" id="booth-number" placeholder="예: 7" />
 
-        <label>연락처 링크 (인스타 등)</label>
-        <input type="text" id="contact-link" placeholder="예: instagram.com/아이디" />
+        <label>인스타그램 아이디</label>
+        <div style="display:flex; gap:8px; align-items:flex-start;">
+          <div style="flex:1;">
+            <div style="display:flex; align-items:center; background:#fff; border:0.5px solid var(--border); border-radius:var(--radius-sm); padding: 0 12px; margin-bottom:12px;">
+              <span style="font-size:14px; color:var(--muted); white-space:nowrap;">instagram.com/</span>
+              <input type="text" id="contact-link" placeholder="아이디만 입력" style="border:none; padding:10px 4px; margin:0;" />
+            </div>
+          </div>
+          <button type="button" class="btn-outline" style="width:auto; padding:10px 14px; white-space:nowrap; margin-top:0;" onclick="testInstagramLink('contact-link')">테스트</button>
+        </div>
 
         <button type="submit" class="btn-primary">셀러 등록 + QR 발급</button>
       </form>
@@ -88,6 +96,29 @@
 <script>
 const BASE_URL = window.location.origin;
 
+// 사용자가 실수로 URL이나 @를 넣어도 순수 아이디만 남기는 정규화
+function normalizeInstagramId(raw) {
+  if (!raw) return '';
+  let v = raw.trim();
+  v = v.replace(/^https?:\/\//i, '');
+  v = v.replace(/^(www\.)?instagram\.com\//i, '');
+  v = v.replace(/^@/, '');
+  v = v.replace(/\/.*$/, '');
+  v = v.split('?')[0];
+  return v.trim();
+}
+
+function testInstagramLink(inputId) {
+  const raw = document.getElementById(inputId).value;
+  const handle = normalizeInstagramId(raw);
+  if (!handle) {
+    showToast('아이디를 먼저 입력해주세요');
+    return;
+  }
+  document.getElementById(inputId).value = handle;
+  window.open(`https://instagram.com/${handle}`, '_blank');
+}
+
 function switchTab(tab) {
   const isSellers = tab === 'sellers';
   document.getElementById('tab-sellers').classList.toggle('active', isSellers);
@@ -102,7 +133,7 @@ document.getElementById('seller-form').addEventListener('submit', async (e) => {
   const payload = {
     seller_name: document.getElementById('seller-name').value,
     booth_number: document.getElementById('booth-number').value,
-    contact_link: document.getElementById('contact-link').value,
+    contact_link: normalizeInstagramId(document.getElementById('contact-link').value),
   };
   const res = await fetch('/api/admin/sellers', {
     method: 'POST',
