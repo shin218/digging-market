@@ -173,6 +173,11 @@ button:active {
   padding: 14px 6px;
   text-align: center;
   cursor: pointer;
+  transition: transform 0.08s ease;
+}
+
+.category-cell:active {
+  transform: scale(0.96);
 }
 
 .category-cell span {
@@ -299,6 +304,12 @@ textarea {
   border-radius: var(--radius-sm);
   padding: 10px;
   align-items: center;
+  cursor: pointer;
+  transition: transform 0.08s ease;
+}
+
+.item-card:active {
+  transform: scale(0.98);
 }
 
 .item-thumb {
