@@ -26,6 +26,7 @@
     <div class="tag-row" style="margin-bottom:16px;">
       <span class="tag selectable active" id="tab-sellers" onclick="switchTab('sellers')">셀러 관리</span>
       <span class="tag selectable" id="tab-categories" onclick="switchTab('categories')">카테고리 관리</span>
+      <span class="tag selectable" id="tab-event" onclick="switchTab('event')">행사 정보</span>
     </div>
 
     <div id="panel-sellers">
@@ -88,6 +89,25 @@
       <p class="section-title" style="margin-top:0;">등록된 카테고리</p>
       <div id="category-list"></div>
     </div>
+
+    <div id="panel-event" style="display:none;">
+      <p style="font-size: 13px; color: var(--muted); margin: 0 0 16px;">
+        여기서 설정하면 메인 페이지에 바로 반영돼요.
+      </p>
+
+      <form id="event-form">
+        <label>날짜</label>
+        <input type="text" id="event-date-input" placeholder="예: 11.22 (토)" />
+
+        <label>시간</label>
+        <input type="text" id="event-time-input" placeholder="예: 오후 12시 ~ 6시" />
+
+        <label>장소</label>
+        <input type="text" id="event-place-input" placeholder="예: 연남동 경의선숲길 인근" />
+
+        <button type="submit" class="btn-primary">저장</button>
+      </form>
+    </div>
   </div>
 </div>
 
@@ -120,12 +140,14 @@ function testInstagramLink(inputId) {
 }
 
 function switchTab(tab) {
-  const isSellers = tab === 'sellers';
-  document.getElementById('tab-sellers').classList.toggle('active', isSellers);
-  document.getElementById('tab-categories').classList.toggle('active', !isSellers);
-  document.getElementById('panel-sellers').style.display = isSellers ? 'block' : 'none';
-  document.getElementById('panel-categories').style.display = isSellers ? 'none' : 'block';
-  if (!isSellers) loadCategories();
+  document.getElementById('tab-sellers').classList.toggle('active', tab === 'sellers');
+  document.getElementById('tab-categories').classList.toggle('active', tab === 'categories');
+  document.getElementById('tab-event').classList.toggle('active', tab === 'event');
+  document.getElementById('panel-sellers').style.display = tab === 'sellers' ? 'block' : 'none';
+  document.getElementById('panel-categories').style.display = tab === 'categories' ? 'block' : 'none';
+  document.getElementById('panel-event').style.display = tab === 'event' ? 'block' : 'none';
+  if (tab === 'categories') loadCategories();
+  if (tab === 'event') loadEventSettings();
 }
 
 document.getElementById('seller-form').addEventListener('submit', async (e) => {
@@ -252,6 +274,34 @@ async function deleteCategory(id, name) {
     showToast(err.detail || '삭제 실패');
   }
 }
+
+// ---------------- 행사 정보 ----------------
+async function loadEventSettings() {
+  const res = await fetch('/api/event');
+  const data = await res.json();
+  document.getElementById('event-date-input').value = data.event_date || '';
+  document.getElementById('event-time-input').value = data.event_time || '';
+  document.getElementById('event-place-input').value = data.event_place || '';
+}
+
+document.getElementById('event-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const payload = {
+    event_date: document.getElementById('event-date-input').value.trim(),
+    event_time: document.getElementById('event-time-input').value.trim(),
+    event_place: document.getElementById('event-place-input').value.trim(),
+  };
+  const res = await fetch('/api/admin/event', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (res.ok) {
+    showToast('행사 정보가 저장됐어요');
+  } else {
+    showToast('저장 실패');
+  }
+});
 
 function escapeHtml(str) {
   const div = document.createElement('div');

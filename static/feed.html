@@ -51,6 +51,9 @@ const params = new URLSearchParams(location.search);
 if (params.get('category')) {
   currentCategory = params.get('category');
 }
+if (params.get('liked') === '1') {
+  likedOnly = true;
+}
 
 async function loadCategoryFilters() {
   try {
@@ -220,6 +223,11 @@ function showToast(msg) {
   toast.textContent = msg;
   toast.classList.add('show');
   setTimeout(() => toast.classList.remove('show'), 2000);
+}
+
+if (likedOnly) {
+  likedOnlyToggle.classList.add('active');
+  likedOnlyToggle.textContent = '♥ 찜한 것만';
 }
 
 loadCategoryFilters();

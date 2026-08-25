@@ -112,6 +112,14 @@ def init_db():
                 "INSERT INTO categories (id, name, icon) VALUES (?, ?, ?)",
                 (str(uuid.uuid4())[:8], name, icon),
             )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS event_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+        """
+    )
     conn.commit()
     conn.close()
 
@@ -219,6 +227,42 @@ class FeedbackIn(BaseModel):
 # ---------------------------------------------------------------------------
 # 카테고리 관리 — admin이 관리하고, 랜딩/피드/셀러등록/내상품관리가 여기서 끌어옴
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 행사 정보 (날짜/시간/장소) — admin이 설정하고 랜딩 페이지가 끌어옴
+# ---------------------------------------------------------------------------
+EVENT_SETTING_KEYS = ("event_date", "event_time", "event_place")
+
+
+@app.get("/api/event")
+def get_event_settings():
+    conn = get_db()
+    rows = conn.execute("SELECT key, value FROM event_settings").fetchall()
+    conn.close()
+    settings = {row["key"]: row["value"] for row in rows}
+    return {k: settings.get(k, "") for k in EVENT_SETTING_KEYS}
+
+
+class EventSettingsUpdate(BaseModel):
+    event_date: str = ""
+    event_time: str = ""
+    event_place: str = ""
+
+
+@app.post("/api/admin/event")
+def update_event_settings(payload: EventSettingsUpdate):
+    conn = get_db()
+    for key in EVENT_SETTING_KEYS:
+        value = getattr(payload, key)
+        conn.execute(
+            "INSERT INTO event_settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
+    conn.commit()
+    conn.close()
+    return get_event_settings()
+
+
 @app.get("/api/categories")
 def list_categories():
     conn = get_db()
