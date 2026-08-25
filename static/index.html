@@ -78,8 +78,8 @@ async function loadCategoryGrid() {
     const categories = await res.json();
 
     const likedCell = `
-      <div class="category-cell" onclick="location.href='/feed?liked=1'">
-        <div>♥</div><span>찜한 것만</span>
+      <div class="category-cell category-cell-liked" onclick="location.href='/feed?liked=1'">
+        <span class="liked-heart">♥</span><span>찜한 것만</span>
       </div>
     `;
 
