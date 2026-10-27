@@ -53,6 +53,14 @@ async function loadStats() {
       <div class="value">${s.avg_revisit_intent ?? '–'}</div>
       <div class="label">평균 재방문 의향 (1~5점)</div>
     </div>
+    <div class="stat-card">
+      <div class="value">${s.total_bids}</div>
+      <div class="label">총 입찰 수 (경매 ${s.auction_items}건)</div>
+    </div>
+    <div class="stat-card">
+      <div class="value">${s.auction_wins} / ${s.buy_now_orders}</div>
+      <div class="label">낙찰 / 즉시구매 건수</div>
+    </div>
   `;
 }
 loadStats();

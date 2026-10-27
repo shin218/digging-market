@@ -73,8 +73,32 @@
       <label>설명</label>
       <textarea id="description" placeholder="상태, 특징 등을 적어주세요"></textarea>
 
-      <label>가격 (원)</label>
+      <label>판매 방식</label>
+      <div class="segmented" id="sale-type-toggle">
+        <button type="button" data-type="fixed" class="active">고정가 · 즉시구매</button>
+        <button type="button" data-type="auction">🔨 경매</button>
+      </div>
+
+      <label id="price-label">가격 (원)</label>
       <input type="text" inputmode="numeric" id="price" placeholder="예: 15,000" />
+      <p class="field-hint" id="price-hint">구매자가 이 가격에 바로 구매할 수 있어요. 구매되면 '예약중'으로 바뀌고 구매자 연락처가 전달돼요.</p>
+
+      <div id="auction-fields" style="display:none;">
+        <label>경매 기간</label>
+        <select id="auction-minutes" class="select-field">
+          <option value="10">10분</option>
+          <option value="30">30분</option>
+          <option value="60" selected>1시간</option>
+          <option value="120">2시간</option>
+          <option value="240">4시간</option>
+          <option value="1440">1일</option>
+          <option value="4320">3일</option>
+        </select>
+
+        <label>즉시구매가 (원, 선택)</label>
+        <input type="text" inputmode="numeric" id="buy-now-price" placeholder="비워두면 경매로만 판매" />
+        <p class="field-hint">첫 입찰이 들어오기 전까지만 이 가격으로 즉시구매할 수 있어요. 마감 3분 전 입찰이 들어오면 마감이 3분 연장돼요.</p>
+      </div>
 
       <button type="submit" class="btn-primary" style="margin-top:8px;">등록하기</button>
     </form>
@@ -211,6 +235,28 @@ function getRawPrice() {
   return priceInput.value.replace(/[^\d]/g, '');
 }
 
+// ---- 판매 방식 (고정가 / 경매) ----
+let saleType = 'fixed';
+const buyNowInput = document.getElementById('buy-now-price');
+
+buyNowInput.addEventListener('input', () => {
+  const digitsOnly = buyNowInput.value.replace(/[^\d]/g, '');
+  buyNowInput.value = digitsOnly ? Number(digitsOnly).toLocaleString('ko-KR') : '';
+});
+
+document.querySelectorAll('#sale-type-toggle button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    saleType = btn.dataset.type;
+    document.querySelectorAll('#sale-type-toggle button').forEach(b => b.classList.toggle('active', b === btn));
+    const isAuction = saleType === 'auction';
+    document.getElementById('auction-fields').style.display = isAuction ? 'block' : 'none';
+    document.getElementById('price-label').textContent = isAuction ? '시작가 (원)' : '가격 (원)';
+    document.getElementById('price-hint').textContent = isAuction
+      ? '첫 입찰은 시작가부터 받아요. 마감 시 최고 입찰자에게 낙찰되고, 낙찰자 연락처가 전달돼요.'
+      : "구매자가 이 가격에 바로 구매할 수 있어요. 구매되면 '예약중'으로 바뀌고 구매자 연락처가 전달돼요.";
+  });
+});
+
 imageInput.addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) return;
@@ -264,7 +310,12 @@ document.getElementById('sell-form').addEventListener('submit', async (e) => {
     return;
   }
   if (!getRawPrice()) {
-    showToast('가격을 입력해주세요');
+    showToast(saleType === 'auction' ? '시작가를 입력해주세요' : '가격을 입력해주세요');
+    return;
+  }
+  const buyNowRaw = buyNowInput.value.replace(/[^\d]/g, '');
+  if (saleType === 'auction' && buyNowRaw && Number(buyNowRaw) <= Number(getRawPrice())) {
+    showToast('즉시구매가는 시작가보다 높아야 해요');
     return;
   }
 
@@ -275,14 +326,22 @@ document.getElementById('sell-form').addEventListener('submit', async (e) => {
   formData.append('title', document.getElementById('title').value);
   formData.append('description', document.getElementById('description').value);
   formData.append('price', getRawPrice());
+  formData.append('sale_type', saleType);
+  if (saleType === 'auction') {
+    formData.append('auction_minutes', document.getElementById('auction-minutes').value);
+    if (buyNowRaw) formData.append('buy_now_price', buyNowRaw);
+  }
 
   try {
     const res = await fetch('/api/items', { method: 'POST', body: formData });
-    if (!res.ok) throw new Error('등록 실패');
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(typeof body.detail === 'string' ? body.detail : '등록 중 오류가 발생했어요');
+    }
     showToast('등록되었습니다!');
     setTimeout(() => location.href = '/feed', 800);
   } catch (err) {
-    showToast('등록 중 오류가 발생했어요');
+    showToast(err.message || '등록 중 오류가 발생했어요');
   }
 });
 

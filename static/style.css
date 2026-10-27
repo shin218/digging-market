@@ -290,6 +290,16 @@ textarea {
   margin-bottom: 12px;
 }
 
+/* 칩이 줄바꿈되며 찌그러지지 않고 가로 스크롤되도록 */
+.filter-row .tag {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+#category-filter-slot {
+  display: contents;
+}
+
 .item-list {
   display: flex;
   flex-direction: column;
@@ -468,4 +478,218 @@ textarea {
 
 .toast.show {
   opacity: 1;
+}
+
+/* ---------- 경매 / 즉시구매 ---------- */
+.segmented {
+  display: flex;
+  gap: 0;
+  background: #fff;
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 3px;
+  margin-bottom: 12px;
+}
+
+.segmented button {
+  flex: 1;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  padding: 9px 6px;
+  border-radius: 8px;
+}
+
+.segmented button.active {
+  background: var(--brand);
+  color: var(--cream);
+  font-weight: 600;
+}
+
+.field-hint {
+  font-size: 11px;
+  color: var(--muted);
+  margin: -6px 0 12px;
+  line-height: 1.4;
+}
+
+.select-field {
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 0.5px solid var(--border);
+  font-size: 14px;
+  background: #fff;
+  color: var(--ink);
+}
+
+.auction-badge {
+  font-size: 10px;
+  background: var(--ink);
+  color: var(--cream);
+  padding: 2px 6px;
+  border-radius: 6px;
+  margin-left: 6px;
+  font-weight: 600;
+}
+
+.countdown {
+  font-variant-numeric: tabular-nums;
+}
+
+.countdown.urgent {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.state-pill {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 20px;
+  margin-top: 4px;
+  background: var(--cream);
+  color: var(--brand-dark);
+}
+
+.state-pill.good { background: #e3efe6; color: var(--success); }
+.state-pill.bad { background: #f7e3e1; color: var(--danger); }
+.state-pill.done { background: var(--cream); color: var(--muted); }
+
+.price-panel {
+  background: #fff;
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+
+.price-panel .row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.price-panel .big {
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.price-panel .sub {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.bid-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.bid-row input {
+  flex: 1;
+  margin-bottom: 0;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.bid-row button {
+  width: auto;
+  padding: 0 18px;
+  white-space: nowrap;
+}
+
+.quick-raise {
+  display: flex;
+  gap: 6px;
+  margin: 8px 0 12px;
+}
+
+.quick-raise button {
+  flex: 1;
+  font-size: 12px;
+  padding: 7px 4px;
+  background: #fff;
+  color: var(--ink);
+  border: 0.5px solid var(--border);
+}
+
+.buyer-box {
+  background: #fff;
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.buyer-box .line {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.link-btn {
+  width: auto;
+  padding: 2px 4px;
+  background: none;
+  color: var(--brand);
+  font-size: 12px;
+}
+
+.bid-history {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  font-size: 13px;
+}
+
+.bid-history li {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 0.5px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+
+.bid-history li.mine {
+  color: var(--brand-dark);
+  font-weight: 600;
+}
+
+.bid-history .when {
+  color: var(--muted);
+  font-size: 11px;
+  margin-left: 6px;
+  font-weight: 400;
+}
+
+.result-box {
+  background: #e3efe6;
+  color: var(--success);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  margin-bottom: 12px;
+}
+
+.order-box {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: var(--cream-soft);
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
