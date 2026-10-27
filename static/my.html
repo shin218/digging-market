@@ -73,6 +73,7 @@ const token = params.get('token');
 document.getElementById('back-link').href = `/sell?token=${encodeURIComponent(token || '')}`;
 
 let availableCategories = [];
+let itemTitles = {};
 
 async function loadCategoryOptions() {
   try {
@@ -114,7 +115,9 @@ async function loadMyItems() {
       return;
     }
 
-    banner.textContent = `총 ${items.length}개 등록됨`;
+    const pendingOrders = items.filter(i => i.order && i.order.status === 'pending').length;
+    banner.textContent = `총 ${items.length}개 등록됨` + (pendingOrders ? ` · 연락할 구매자 ${pendingOrders}명` : '');
+    itemTitles = Object.fromEntries(items.map(i => [i.id, i.title]));
     listEl.innerHTML = items.map(renderItemCard).join('');
   } catch (err) {
     banner.textContent = '⚠️ 접근 권한이 없어요. 셀러용 QR코드로 다시 접속해주세요.';
@@ -124,7 +127,63 @@ async function loadMyItems() {
 function statusLabel(status) {
   if (status === 'sold_out') return '판매완료';
   if (status === 'reserved') return '예약중';
+  if (status === 'unsold') return '유찰';
   return '판매중';
+}
+
+function won(n) {
+  return `${Number(n).toLocaleString('ko-KR')}원`;
+}
+
+function formatLocal(utc) {
+  const d = new Date(utc.replace(' ', 'T') + 'Z');
+  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+function isLockedAuction(item) {
+  return item.sale_type === 'auction' && item.bid_count > 0 && item.status === 'available';
+}
+
+/** 상태 변경 UI: 진행 중/유찰된 경매는 셀러가 임의로 바꿀 수 없다 (입찰자 보호) */
+function statusControlHtml(item) {
+  if (item.sale_type === 'auction' && item.status === 'available') {
+    return `<span class="state-pill">경매 진행중</span>`;
+  }
+  if (item.sale_type === 'auction' && item.status === 'unsold') {
+    return `<span class="state-pill done">유찰</span>`;
+  }
+  const options = item.sale_type === 'auction'
+    ? [['reserved', '거래 대기'], ['sold_out', '판매완료']]
+    : [['available', '판매중'], ['reserved', '예약중'], ['sold_out', '판매완료']];
+  return `
+    <select class="status-select" onchange="changeStatus('${item.id}', this.value, this)" data-prev="${item.status}">
+      ${options.map(([v, label]) => `<option value="${v}" ${item.status === v ? 'selected' : ''}>${label}</option>`).join('')}
+    </select>`;
+}
+
+function saleInfoHtml(item) {
+  if (item.sale_type !== 'auction') {
+    return `${categoryIcon(item.category)} ${escapeHtml(item.category)} · ${won(item.price)}`;
+  }
+  let info = `🔨 경매 · ${item.bid_count ? '현재 ' + won(item.display_price) + ' (입찰 ' + item.bid_count + ')' : '시작 ' + won(item.price)}`;
+  if (item.status === 'available') info += ` · ${formatLocal(item.auction_end_at)} 마감`;
+  if (item.buy_now_price && item.buy_now_available) info += ` · 즉시구매 ${won(item.buy_now_price)}`;
+  return info;
+}
+
+function orderHtml(item) {
+  if (!item.order) return '';
+  const o = item.order;
+  const kind = o.order_type === 'auction_win' ? '🎉 낙찰' : '⚡ 즉시구매';
+  const done = o.status === 'completed' ? ' · 거래 완료' : ' · 연락해서 거래를 진행해주세요';
+  const fixedHint = item.sale_type === 'fixed' && o.status !== 'completed'
+    ? "<br><span style=\"color:var(--muted);\">구매자와 연락이 안 되면 상태를 '판매중'으로 바꾸면 거래가 취소되고 다시 판매돼요.</span>" : '';
+  return `
+    <div class="order-box">
+      <strong>${kind} ${won(o.price)}</strong>${done}<br>
+      구매자: <strong>${escapeHtml(o.buyer_name)}</strong> · 연락처: <strong>${escapeHtml(o.buyer_contact)}</strong>
+      ${fixedHint}
+    </div>`;
 }
 
 function categoryIcon(name) {
@@ -139,18 +198,18 @@ function renderItemCard(item) {
         <img class="item-thumb" src="${item.image_path}" alt="" />
         <div style="flex:1; min-width:0;">
           <p style="margin:0; font-weight:600; font-size:13px;">${escapeHtml(item.title)}</p>
-          <p style="margin:3px 0 0; font-size:12px; color:var(--muted);">${categoryIcon(item.category)} ${escapeHtml(item.category)} · ${Number(item.price).toLocaleString('ko-KR')}원</p>
+          <p style="margin:3px 0 0; font-size:12px; color:var(--muted);">${saleInfoHtml(item)}</p>
         </div>
-        <select class="status-select" onchange="changeStatus('${item.id}', this.value)">
-          <option value="available" ${item.status === 'available' ? 'selected' : ''}>판매중</option>
-          <option value="reserved" ${item.status === 'reserved' ? 'selected' : ''}>예약중</option>
-          <option value="sold_out" ${item.status === 'sold_out' ? 'selected' : ''}>판매완료</option>
-        </select>
+        ${statusControlHtml(item)}
       </div>
+
+      ${orderHtml(item)}
 
       <div class="item-manage-actions">
         <button class="btn-outline" onclick="toggleEdit('${item.id}')">수정</button>
-        <button class="btn-outline" style="color:var(--danger); border-color:var(--danger);" onclick="deleteItem('${item.id}', '${escapeHtml(item.title)}')">삭제</button>
+        ${isLockedAuction(item)
+          ? '<span style="font-size:11px; color:var(--muted); align-self:center;">입찰 진행 중엔 삭제할 수 없어요</span>'
+          : `<button class="btn-outline" style="color:var(--danger); border-color:var(--danger);" onclick="deleteItem('${item.id}')">삭제</button>`}
       </div>
 
       <div class="edit-item-form" id="edit-${item.id}">
@@ -162,8 +221,8 @@ function renderItemCard(item) {
         <input type="text" id="edit-title-${item.id}" value="${escapeAttr(item.title)}" />
         <label>설명</label>
         <textarea id="edit-desc-${item.id}">${escapeHtml(item.description || '')}</textarea>
-        <label>가격 (원)</label>
-        <input type="text" inputmode="numeric" id="edit-price-${item.id}" value="${Number(item.price).toLocaleString('ko-KR')}" oninput="formatPriceInput(this)" />
+        <label>${item.sale_type === 'auction' ? '시작가 (원)' : '가격 (원)'}</label>
+        <input type="text" inputmode="numeric" id="edit-price-${item.id}" value="${Number(item.price).toLocaleString('ko-KR')}" oninput="formatPriceInput(this)" ${item.sale_type === 'auction' && item.bid_count > 0 ? 'disabled title="입찰이 들어온 뒤에는 시작가를 바꿀 수 없어요"' : ''} />
         <div style="display:flex; gap:8px; margin-top:8px;">
           <button class="btn-outline" style="flex:1;" onclick="toggleEdit('${item.id}')">취소</button>
           <button class="btn-primary" style="flex:1;" onclick="saveEdit('${item.id}')">저장</button>
@@ -183,19 +242,32 @@ function toggleEdit(itemId) {
   form.style.display = form.style.display === 'block' ? 'none' : 'block';
 }
 
-async function changeStatus(itemId, status) {
+async function readError(res, fallback) {
+  const body = await res.json().catch(() => ({}));
+  return typeof body.detail === 'string' ? body.detail : fallback;
+}
+
+async function changeStatus(itemId, status, selectEl) {
+  const prev = selectEl ? selectEl.dataset.prev : null;
+  const card = document.getElementById(`card-${itemId}`);
+  const hasOrder = card && card.querySelector('.order-box');
+  if (status === 'available' && hasOrder &&
+      !confirm('판매중으로 바꾸면 현재 구매자와의 거래가 취소돼요. 계속할까요?')) {
+    if (selectEl && prev) selectEl.value = prev;
+    return;
+  }
   try {
     const res = await fetch(`/api/items/${itemId}/status`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token, status })
     });
-    if (!res.ok) throw new Error('실패');
+    if (!res.ok) throw new Error(await readError(res, '상태 변경 중 오류가 발생했어요'));
     showToast('상태가 변경됐어요');
   } catch (err) {
-    showToast('상태 변경 중 오류가 발생했어요');
-    loadMyItems();
+    showToast(err.message || '상태 변경 중 오류가 발생했어요');
   }
+  loadMyItems();
 }
 
 async function saveEdit(itemId) {
@@ -215,26 +287,27 @@ async function saveEdit(itemId) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token, category, title, description, price: Number(priceRaw) })
     });
-    if (!res.ok) throw new Error('실패');
+    if (!res.ok) throw new Error(await readError(res, '수정 중 오류가 발생했어요'));
     showToast('수정됐어요');
     loadMyItems();
   } catch (err) {
-    showToast('수정 중 오류가 발생했어요');
+    showToast(err.message || '수정 중 오류가 발생했어요');
   }
 }
 
-async function deleteItem(itemId, title) {
+async function deleteItem(itemId) {
+  const title = (itemTitles[itemId] || '').trim();
   if (!confirm(`"${title}" 상품을 삭제할까요? 되돌릴 수 없어요.`)) return;
 
   try {
     const res = await fetch(`/api/items/${itemId}?token=${encodeURIComponent(token)}`, {
       method: 'DELETE'
     });
-    if (!res.ok) throw new Error('실패');
+    if (!res.ok) throw new Error(await readError(res, '삭제 중 오류가 발생했어요'));
     showToast('삭제됐어요');
     document.getElementById(`card-${itemId}`).remove();
   } catch (err) {
-    showToast('삭제 중 오류가 발생했어요');
+    showToast(err.message || '삭제 중 오류가 발생했어요');
   }
 }
 
