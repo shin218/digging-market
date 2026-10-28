@@ -4,6 +4,7 @@ FastAPI + SQLite, 결제 기능 없음 (외부 채널 연결 방식)
 경매(입찰) / 즉시구매 지원 — 낙찰·구매 확정 후 거래는 셀러 연락처로 앱 밖에서 진행
 """
 import os
+import re
 import sqlite3
 import uuid
 import base64
@@ -576,6 +577,74 @@ def verify_seller_token(token: str):
     return seller
 
 
+# ---------------------------------------------------------------------------
+# 셀러 중복 체크 — 이름 / 부스 번호 / 인스타 아이디
+# 표기만 다른 같은 값("7"과 "7번", "@Minji"와 "minji")도 같은 값으로 본다.
+# ---------------------------------------------------------------------------
+def normalize_name(value: str) -> str:
+    return re.sub(r"\s+", "", value or "").lower()
+
+
+def normalize_booth(value: str) -> str:
+    v = re.sub(r"\s+", "", value or "").lower()
+    return re.sub(r"번$", "", v)
+
+
+def normalize_instagram(value: str) -> str:
+    """프론트와 같은 규칙: URL/@ 제거 후 아이디만. 인스타 아이디는 대소문자 구분이 없다."""
+    v = (value or "").strip()
+    v = re.sub(r"^https?://", "", v, flags=re.I)
+    v = re.sub(r"^(www\.)?instagram\.com/", "", v, flags=re.I)
+    v = v.lstrip("@")
+    v = v.split("/")[0].split("?")[0]
+    return v.strip().lower()
+
+
+SELLER_FIELD_LABELS = {  # 받침에 따라 '이에요/예요'가 달라서 문장째로 둔다
+    "seller_name": "셀러 이름이에요",
+    "booth_number": "부스 번호예요",
+    "contact_link": "인스타그램 아이디예요",
+}
+
+
+def find_seller_conflicts(conn, seller_name: str, booth_number: str, contact_link: str,
+                          exclude_token: Optional[str] = None) -> list:
+    """같은 값을 이미 쓰고 있는 다른 셀러 목록. 비어 있는 값(부스/인스타)은 검사하지 않는다."""
+    targets = {
+        "seller_name": normalize_name(seller_name),
+        "booth_number": normalize_booth(booth_number),
+        "contact_link": normalize_instagram(contact_link),
+    }
+    normalizers = {
+        "seller_name": normalize_name,
+        "booth_number": normalize_booth,
+        "contact_link": normalize_instagram,
+    }
+    conflicts = []
+    for row in conn.execute("SELECT token, seller_name, booth_number, contact_link FROM sellers").fetchall():
+        if exclude_token and row["token"] == exclude_token:
+            continue
+        for field, target in targets.items():
+            if target and normalizers[field](row[field]) == target:
+                conflicts.append({
+                    "field": field,
+                    "existing_seller": row["seller_name"],
+                    "message": f"이미 등록된 {SELLER_FIELD_LABELS[field]} ({row['seller_name']})",
+                })
+    # 같은 필드에서 여러 셀러와 겹치면 첫 번째만
+    seen, unique = set(), []
+    for c in conflicts:
+        if c["field"] not in seen:
+            seen.add(c["field"])
+            unique.append(c)
+    return unique
+
+
+def raise_if_conflicts(conflicts: list):
+    if conflicts:
+        raise HTTPException(status_code=409, detail=" / ".join(c["message"] for c in conflicts))
+
+
 class SellerUpdate(BaseModel):
     seller_name: str
     contact_link: str = ""
@@ -584,16 +653,19 @@ class SellerUpdate(BaseModel):
 @app.patch("/api/sellers/{token}")
 def update_seller_info(token: str, payload: SellerUpdate):
     """셀러 본인이 이름/연락처만 수정 가능. 부스번호는 관리자만 변경 가능."""
-    seller = get_seller_by_token(token)
-    if not seller:
-        raise HTTPException(status_code=403, detail="유효하지 않은 셀러 토큰입니다")
-    conn = get_db()
-    conn.execute(
-        "UPDATE sellers SET seller_name = ?, contact_link = ? WHERE token = ?",
-        (payload.seller_name, payload.contact_link, token),
-    )
-    conn.commit()
-    conn.close()
+    seller_name = payload.seller_name.strip()
+    contact_link = normalize_instagram(payload.contact_link)
+    if not seller_name:
+        raise HTTPException(status_code=400, detail="셀러 이름을 입력해주세요")
+    with write_tx() as tx:
+        if not tx.execute("SELECT 1 FROM sellers WHERE token = ?", (token,)).fetchone():
+            raise HTTPException(status_code=403, detail="유효하지 않은 셀러 토큰입니다")
+        # 부스 번호는 셀러가 못 바꾸므로 이름/인스타만 검사
+        raise_if_conflicts(find_seller_conflicts(tx, seller_name, "", contact_link, exclude_token=token))
+        tx.execute(
+            "UPDATE sellers SET seller_name = ?, contact_link = ? WHERE token = ?",
+            (seller_name, contact_link, token),
+        )
     return get_seller_by_token(token)
 
 
@@ -606,16 +678,31 @@ class SellerCreate(BaseModel):
     contact_link: str = ""
 
 
+@app.get("/api/admin/sellers/check")
+def check_seller_duplicates(seller_name: str = "", booth_number: str = "", contact_link: str = ""):
+    """관리자 화면에서 입력하는 동안 실시간으로 중복을 알려주기 위한 조회용 API"""
+    conn = get_db()
+    conflicts = find_seller_conflicts(conn, seller_name, booth_number, contact_link)
+    conn.close()
+    return {"conflicts": conflicts}
+
+
 @app.post("/api/admin/sellers")
 def create_seller(payload: SellerCreate):
+    seller_name = payload.seller_name.strip()
+    booth_number = payload.booth_number.strip()
+    contact_link = normalize_instagram(payload.contact_link)
+    if not seller_name:
+        raise HTTPException(status_code=400, detail="셀러 이름을 입력해주세요")
+
     token = str(uuid.uuid4())[:10]
-    conn = get_db()
-    conn.execute(
-        "INSERT INTO sellers (token, seller_name, booth_number, contact_link) VALUES (?, ?, ?, ?)",
-        (token, payload.seller_name, payload.booth_number, payload.contact_link),
-    )
-    conn.commit()
-    conn.close()
+    # 검사와 저장을 한 트랜잭션에서 — 동시에 같은 셀러를 두 번 등록하는 경우도 막힘
+    with write_tx() as tx:
+        raise_if_conflicts(find_seller_conflicts(tx, seller_name, booth_number, contact_link))
+        tx.execute(
+            "INSERT INTO sellers (token, seller_name, booth_number, contact_link) VALUES (?, ?, ?, ?)",
+            (token, seller_name, booth_number, contact_link),
+        )
     return {"token": token, "sell_url": f"/sell?token={token}"}
 
 
@@ -624,7 +711,21 @@ def list_sellers():
     conn = get_db()
     rows = conn.execute("SELECT * FROM sellers ORDER BY created_at DESC").fetchall()
     conn.close()
-    return [dict(row) for row in rows]
+    sellers = [dict(row) for row in rows]
+
+    # 중복 체크 도입 전에 이미 들어간 중복 데이터를 관리자가 알아볼 수 있게 표시
+    normalizers = {"seller_name": normalize_name, "booth_number": normalize_booth, "contact_link": normalize_instagram}
+    counts = {field: {} for field in normalizers}
+    for s in sellers:
+        for field, fn in normalizers.items():
+            key = fn(s[field])
+            if key:
+                counts[field][key] = counts[field].get(key, 0) + 1
+    for s in sellers:
+        s["duplicate_fields"] = [
+            field for field, fn in normalizers.items() if fn(s[field]) and counts[field][fn(s[field])] > 1
+        ]
+    return sellers
 
 
 # ---------------------------------------------------------------------------

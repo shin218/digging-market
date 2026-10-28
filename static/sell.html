@@ -213,13 +213,16 @@ async function saveSellerInfo() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ seller_name, contact_link })
     });
-    if (!res.ok) throw new Error('저장 실패');
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(typeof body.detail === 'string' ? body.detail : '저장 중 오류가 발생했어요');
+    }
     currentSeller = await res.json();
     renderSellerBadge();
     toggleEditForm(false);
     showToast('정보가 저장됐어요');
   } catch (err) {
-    showToast('저장 중 오류가 발생했어요');
+    showToast(err.message || '저장 중 오류가 발생했어요');
   }
 }
 
