@@ -956,3 +956,36 @@ button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* ---------- 폼 검증 에러 ---------- */
+.field-error {
+  font-size: 12px;
+  color: var(--danger);
+  margin: -6px 0 12px;
+  min-height: 0;
+}
+
+.field-error:empty {
+  display: none;
+}
+
+.has-error,
+.has-error:focus {
+  border-color: var(--danger) !important;
+  box-shadow: 0 0 0 3px rgba(192, 57, 43, 0.12);
+}
+
+.dup-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  color: #fff;
+  background: var(--danger);
+  border-radius: 6px;
+  vertical-align: middle;
+}
