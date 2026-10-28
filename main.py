@@ -824,7 +824,7 @@ async def create_item(
 def list_items(category: Optional[str] = None, status: Optional[str] = "available"):
     """
     status는 쉼표로 여러 개 지정 가능 (예: available,reserved,sold_out).
-    판매중 → 예약중 → 거래완료 순으로, 같은 상태 안에서는 최신순.
+    판매중 → 예약중 → 판매완료 순으로, 같은 상태 안에서는 최신순.
     """
     finalize_expired_auctions()
     conn = get_db()

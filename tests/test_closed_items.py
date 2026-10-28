@@ -1,5 +1,5 @@
 """
-예약중·거래완료 상품: 목록에는 남아 있되 다른 고객은 입찰/구매할 수 없어야 한다.
+예약중·판매완료 상품: 목록에는 남아 있되 다른 고객은 입찰/구매할 수 없어야 한다.
 """
 from conftest import buyer, make_item
 
@@ -7,7 +7,7 @@ FEED_STATUSES = {"status": "available,reserved,sold_out"}
 
 
 def test_feed_keeps_reserved_and_sold_items_in_status_order(client, seller, clock):
-    sold = make_item(client, seller, title="거래완료 상품").json()["id"]
+    sold = make_item(client, seller, title="판매완료 상품").json()["id"]
     reserved = make_item(client, seller, title="예약 상품").json()["id"]
     unsold = make_item(client, seller, title="유찰 경매", sale_type="auction", auction_minutes=10).json()["id"]
     available = make_item(client, seller, title="판매중 상품").json()["id"]
@@ -18,7 +18,7 @@ def test_feed_keeps_reserved_and_sold_items_in_status_order(client, seller, cloc
     clock.advance(minutes=11)  # 입찰 없던 경매 → 유찰
 
     items = client.get("/api/items", params=FEED_STATUSES).json()
-    assert [i["id"] for i in items] == [available, reserved, sold]  # 판매중 → 예약중 → 거래완료, 유찰 제외
+    assert [i["id"] for i in items] == [available, reserved, sold]  # 판매중 → 예약중 → 판매완료, 유찰 제외
     assert unsold not in [i["id"] for i in items]
     assert [i["buy_now_available"] for i in items] == [True, False, False]
 
@@ -44,7 +44,7 @@ def test_reserved_and_sold_fixed_items_cannot_be_bought(client, seller):
     assert client.post(f"/api/items/{item_id}/buy-now", json=buyer(2)).status_code == 409  # 예약중
 
     client.patch(f"/api/items/{item_id}/status", json={"token": seller, "status": "sold_out"})
-    assert client.post(f"/api/items/{item_id}/buy-now", json=buyer(3)).status_code == 409  # 거래완료
+    assert client.post(f"/api/items/{item_id}/buy-now", json=buyer(3)).status_code == 409  # 판매완료
 
 
 def test_seller_marked_reserved_item_cannot_be_bought(client, seller):
