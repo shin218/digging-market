@@ -822,6 +822,10 @@ async def create_item(
 # ---------------------------------------------------------------------------
 @app.get("/api/items")
 def list_items(category: Optional[str] = None, status: Optional[str] = "available"):
+    """
+    status는 쉼표로 여러 개 지정 가능 (예: available,reserved,sold_out).
+    판매중 → 예약중 → 거래완료 순으로, 같은 상태 안에서는 최신순.
+    """
     finalize_expired_auctions()
     conn = get_db()
     query = "SELECT * FROM items WHERE 1=1"
@@ -829,10 +833,19 @@ def list_items(category: Optional[str] = None, status: Optional[str] = "availabl
     if category and category != "전체":
         query += " AND category = ?"
         params.append(category)
-    if status:
-        query += " AND status = ?"
-        params.append(status)
-    query += " ORDER BY created_at DESC"
+    statuses = [s.strip() for s in (status or "").split(",") if s.strip()]
+    if statuses:
+        query += f" AND status IN ({','.join('?' * len(statuses))})"
+        params.extend(statuses)
+    query += """
+        ORDER BY CASE status
+                   WHEN 'available' THEN 0
+                   WHEN 'reserved' THEN 1
+                   WHEN 'sold_out' THEN 2
+                   ELSE 3
+                 END,
+                 created_at DESC
+    """
     rows = conn.execute(query, params).fetchall()
     conn.close()
     now = now_utc()

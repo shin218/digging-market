@@ -249,9 +249,10 @@ async function loadItems() {
   if (myActivity) {
     url = `/api/buyers/${encodeURIComponent(getBuyer().token)}/activity`;
   } else {
-    url = currentCategory === '전체'
-      ? '/api/items'
-      : `/api/items?category=${encodeURIComponent(currentCategory)}`;
+    // 예약중·거래완료 상품도 목록에 남긴다 (구매/입찰 버튼만 막음). 유찰된 경매는 제외
+    const params = new URLSearchParams({ status: 'available,reserved,sold_out' });
+    if (currentCategory !== '전체') params.set('category', currentCategory);
+    url = `/api/items?${params}`;
   }
 
   try {
@@ -308,8 +309,9 @@ const MY_STATE_LABEL = {
 function renderItem(item) {
   const liked = likedItems.has(item.id);
   const isAuction = item.sale_type === 'auction';
-  const soldBadge = item.status === 'sold_out' ? '<span class="sold-badge">품절</span>' : '';
-  const reservedBadge = item.status === 'reserved' ? '<span class="sold-badge" style="background:#c9a15a;">예약중</span>' : '';
+  const soldBadge = item.status === 'sold_out' ? '<span class="sold-badge">거래완료</span>' : '';
+  const reservedBadge = item.status === 'reserved' ? '<span class="sold-badge reserved">예약중</span>' : '';
+  const isClosed = item.status === 'reserved' || item.status === 'sold_out';
   // 긴 제목의 말줄임에 배지가 잘리지 않도록 제목 앞에 둔다
   const auctionBadge = isAuction ? '<span class="auction-badge">경매</span>' : '';
   const booth = item.booth_number ? escapeHtml(item.booth_number) + '번 부스' : '';
@@ -340,7 +342,7 @@ function renderItem(item) {
   }
 
   return `
-    <div class="item-card" data-id="${escapeAttr(item.id)}">
+    <div class="item-card${isClosed ? ' is-closed' : ''}" data-id="${escapeAttr(item.id)}">
       <img class="item-thumb" src="${escapeAttr(item.image_path)}" alt="${escapeAttr(item.title)}" />
       <div class="item-info">
         <p class="title">${auctionBadge}<span class="title-text">${escapeHtml(item.title)}</span>${soldBadge}${reservedBadge}</p>
@@ -441,6 +443,18 @@ function openDetail(itemId) {
   }
 }
 
+/** 예약중·거래완료 상품 안내 (본인이 산 상품이 아닌 경우) */
+function closedNoticeHtml(item) {
+  const auctionWon = item.sale_type === 'auction' && item.bid_count;
+  if (item.status === 'sold_out') {
+    return `<div class="closed-notice">🔒 거래가 완료된 상품이에요.</div>`;
+  }
+  if (item.status === 'reserved') {
+    return `<div class="closed-notice">🔒 ${auctionWon ? '경매가 끝나 다른 분께 낙찰됐어요' : '다른 분과 거래가 진행 중인 예약 상품이에요'}.<br><span>구매·입찰은 할 수 없어요.</span></div>`;
+  }
+  return `<div class="closed-notice">지금은 구매할 수 없는 상품이에요.</div>`;
+}
+
 // ---- 고정가 상품 ----
 function renderFixedDetail(item) {
   const body = document.getElementById('detail-body');
@@ -459,9 +473,24 @@ function renderFixedDetail(item) {
       <button class="btn-primary btn-block" id="buy-now-btn" onclick="submitBuyNow()">⚡ ${won(item.display_price)}에 즉시구매</button>`;
     contact.innerHTML = contactButtonHtml(item, '구매 전에 셀러에게 문의하기').replace('btn-primary', 'btn-outline');
   } else {
-    html += `<p style="font-size:13px; color:var(--muted); margin:0 0 12px;">이미 예약됐거나 판매된 상품이에요.</p>`;
+    html += `<div id="closed-slot">${closedNoticeHtml(item)}</div>`;
+    checkMyPurchase(item); // 내가 산 상품이면 안내를 '구매 확정'으로 교체
   }
   body.innerHTML = html;
+}
+
+async function checkMyPurchase(item) {
+  try {
+    const res = await fetch(`/api/items/${encodeURIComponent(item.id)}/bids?buyer_token=${encodeURIComponent(getBuyer().token)}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data.i_won || !detailItem || detailItem.id !== item.id) return;
+    const slot = document.getElementById('closed-slot');
+    if (slot) slot.innerHTML = `<div class="result-box">✅ 내가 구매한 상품이에요. 셀러에게 연락해서 거래를 마무리해주세요.</div>`;
+    document.getElementById('detail-contact').innerHTML = contactButtonHtml(item);
+  } catch (err) {
+    // 확인 실패 시엔 일반 안내 그대로 둠
+  }
 }
 
 // ---- 경매 상품 ----
@@ -498,7 +527,9 @@ async function refreshAuction() {
     statusEl.innerHTML = `<div class="result-box">🎉 낙찰됐어요! 셀러에게 연락해서 거래를 마무리해주세요. 내 연락처도 셀러에게 전달됐어요.</div>`;
     contactEl.innerHTML = contactButtonHtml(item);
   } else if (!item.auction_open) {
-    statusEl.innerHTML = `<p style="font-size:13px; color:var(--muted); margin:0 0 12px;">${item.bid_count ? '경매가 끝났어요. 다른 분께 낙찰됐어요.' : '입찰 없이 마감됐어요.'}</p>`;
+    statusEl.innerHTML = item.bid_count
+      ? closedNoticeHtml(item)
+      : `<div class="closed-notice">입찰 없이 마감됐어요.</div>`;
     contactEl.innerHTML = '';
   } else if (data.i_am_highest) {
     statusEl.innerHTML = `<p style="margin:0 0 12px;"><span class="state-pill good">현재 최고 입찰자예요</span></p>`;

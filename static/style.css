@@ -989,3 +989,33 @@ button:disabled {
   border-radius: 6px;
   vertical-align: middle;
 }
+
+/* ---------- 예약중·거래완료 상품 (목록엔 남기되 구매 불가로 보이게) ---------- */
+.sold-badge.reserved {
+  background: #c9a15a;
+}
+
+.item-card.is-closed .item-thumb {
+  filter: grayscale(0.55);
+  opacity: 0.7;
+}
+
+.item-card.is-closed .title-text,
+.item-card.is-closed .price {
+  color: var(--muted);
+}
+
+.closed-notice {
+  background: var(--cream);
+  color: var(--brand-dark);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.55;
+  margin-bottom: 12px;
+}
+
+.closed-notice span {
+  color: var(--muted);
+  font-size: 12px;
+}
