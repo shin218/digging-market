@@ -466,6 +466,27 @@ textarea {
   text-overflow: ellipsis;
 }
 
+/* 경매 카드: '부스명 · 남은 시간' — 부스명만 줄어들고 남은 시간은 잘리지 않게 */
+.item-info .meta.meta-timed {
+  display: flex;
+  align-items: baseline;
+}
+
+.item-info .meta .meta-seller {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.item-info .meta .countdown {
+  flex-shrink: 0;
+}
+
+.item-info .meta .meta-sep {
+  flex-shrink: 0;
+  margin: 0 4px;
+}
+
 .sold-badge {
   display: inline-flex;
   align-items: center;
