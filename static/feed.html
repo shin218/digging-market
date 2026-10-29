@@ -180,6 +180,17 @@ function tickCountdowns() {
 }
 setInterval(tickCountdowns, 1000);
 
+/** '1', '1번' 어느 쪽으로 입력돼 있어도 '1번 부스'로 (escape 포함) */
+function boothLabel(booth) {
+  return escapeHtml(String(booth).trim().replace(/번$/, '')) + '번 부스';
+}
+
+/** '부영의 레코드샵 · 1번 부스' — 부스가 없으면 셀러 이름만 */
+function sellerBoothText(item) {
+  return [item.seller_name ? escapeHtml(item.seller_name) : '', item.booth_number ? boothLabel(item.booth_number) : '']
+    .filter(Boolean).join(' · ');
+}
+
 function won(n) {
   return `${Number(n).toLocaleString('ko-KR')}원`;
 }
@@ -314,24 +325,27 @@ function renderItem(item) {
   const isClosed = item.status === 'reserved' || item.status === 'sold_out';
   // 긴 제목의 말줄임에 배지가 잘리지 않도록 제목 앞에 둔다
   const auctionBadge = isAuction ? '<span class="auction-badge">경매</span>' : '';
-  const booth = item.booth_number ? escapeHtml(item.booth_number) + '번 부스' : '';
+  // 목록 카드엔 부스명(셀러 이름)만. 부스 번호·입찰 수는 상세 팝업에서 보여준다
+  const sellerName = item.seller_name ? escapeHtml(item.seller_name) : '';
 
   // 1줄: 가격(굵게) / 2줄: 보조 정보(회색)
   let priceLine;
   const metaParts = [];
   if (isAuction && item.auction_open) {
     priceLine = `<span class="price-label">${item.bid_count ? '현재가' : '시작가'}</span>${won(item.display_price)}`;
-    metaParts.push(`입찰 ${item.bid_count}`, countdownHtml(item.auction_end_at));
+    // 이름이 길면 이름만 말줄임되고 남은 시간은 항상 보이게
+    if (sellerName) metaParts.push(`<span class="meta-seller">${sellerName}</span>`);
+    metaParts.push(countdownHtml(item.auction_end_at));
   } else if (isAuction) {
     priceLine = item.bid_count
       ? `<span class="price-label">최종</span>${won(item.display_price)}`
       : '<span class="price-label">유찰</span>';
-    if (booth) metaParts.push(booth);
+    if (sellerName) metaParts.push(sellerName);
   } else {
     priceLine = won(item.display_price);
-    if (booth) metaParts.push(booth);
+    if (sellerName) metaParts.push(sellerName);
   }
-  const meta = metaParts.join(' · ');
+  const meta = metaParts.join('<span class="meta-sep">·</span>');
 
   let pill = '';
   if (item.my_state && MY_STATE_LABEL[item.my_state]) {
@@ -347,7 +361,7 @@ function renderItem(item) {
       <div class="item-info">
         <p class="title">${auctionBadge}<span class="title-text">${escapeHtml(item.title)}</span>${soldBadge}${reservedBadge}</p>
         <p class="price">${priceLine}</p>
-        ${meta ? `<p class="meta">${meta}</p>` : ''}
+        ${meta ? `<p class="meta${isAuction && item.auction_open ? ' meta-timed' : ''}">${meta}</p>` : ''}
         ${pill}
       </div>
       <button class="like-btn ${liked ? 'liked' : ''}" data-id="${escapeAttr(item.id)}" aria-label="찜하기">${liked ? '♥' : '♡'}</button>
@@ -400,7 +414,7 @@ function contactButtonHtml(item, label) {
         <button class="btn-primary btn-block">💬 ${label || '셀러에게 연락하기'}</button>
       </a>`;
   }
-  return `<p style="text-align:center; color:var(--muted); font-size:13px;">${item.booth_number ? escapeHtml(item.booth_number) + '번 부스에서 직접 만나보세요' : '현장에서 셀러를 찾아주세요'}</p>`;
+  return `<p style="text-align:center; color:var(--muted); font-size:13px;">${item.booth_number ? boothLabel(item.booth_number) + '에서 직접 만나보세요' : '현장에서 셀러를 찾아주세요'}</p>`;
 }
 
 function openDetail(itemId) {
@@ -422,7 +436,7 @@ function openDetail(itemId) {
       ${item.sale_type === 'auction' ? '<span class="auction-badge">경매</span>' : ''}
     </div>
     <p class="detail-seller">
-      ${escapeHtml(item.seller_name)}${item.booth_number ? ' · ' + escapeHtml(item.booth_number) + '번 부스' : ''}
+      ${sellerBoothText(item)}
     </p>
     ${item.description ? `<p class="detail-desc">${escapeHtml(item.description)}</p>` : ''}
     <div id="detail-body"></div>
