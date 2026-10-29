@@ -36,12 +36,12 @@
       </p>
 
       <form id="seller-form" style="margin-bottom: 24px;">
-        <label>셀러 이름 / 부스명</label>
+        <label>셀러 이름 / 부스명 <span class="required-mark">*</span></label>
         <input type="text" id="seller-name" placeholder="예: 민지의 레코드샵" required />
         <p class="field-error" id="err-seller_name"></p>
 
-        <label>부스 번호</label>
-        <input type="text" id="booth-number" placeholder="예: 7" />
+        <label>부스 번호 <span class="required-mark">*</span></label>
+        <input type="text" id="booth-number" placeholder="예: 7" required />
         <p class="field-error" id="err-booth_number"></p>
 
         <label>인스타그램 아이디</label>
@@ -154,6 +154,7 @@ function switchTab(tab) {
 }
 
 // ---------------- 셀러 등록 + 중복 체크 ----------------
+// 부스 번호·인스타 중복 → 저장 불가(빨강) / 셀러명 중복 → 경고만(주황), 저장 가능
 const SELLER_INPUTS = {
   seller_name: 'seller-name',
   booth_number: 'booth-number',
@@ -164,6 +165,14 @@ let currentConflicts = [];
 let checkTimer = null;
 let checkSeq = 0;
 
+function escapeAttr(str) {
+  return escapeHtml(str).replace(/"/g, '&quot;');
+}
+
+function hasBlocking(conflicts) {
+  return conflicts.some(c => c.blocking);
+}
+
 function sellerPayload() {
   return {
     seller_name: document.getElementById('seller-name').value.trim(),
@@ -172,32 +181,45 @@ function sellerPayload() {
   };
 }
 
+// 필수 입력 누락 에러는 중복 체크 결과와 따로 관리 (중복 체크 응답이 필수 에러를 지우지 않게)
+const requiredErrors = {};
+
 function renderConflicts(conflicts) {
   currentConflicts = conflicts;
   Object.entries(SELLER_INPUTS).forEach(([field, inputId]) => {
     const conflict = conflicts.find(c => c.field === field);
-    document.getElementById(`err-${field}`).textContent = conflict ? `⚠ ${conflict.message}` : '';
+    const isError = (conflict && conflict.blocking) || (!conflict && !!requiredErrors[field]);
+    const message = conflict ? conflict.message : requiredErrors[field];
+    const msgEl = document.getElementById(`err-${field}`);
+    msgEl.textContent = message ? `⚠ ${message}` : '';
+    msgEl.classList.toggle('is-warning', !!message && !isError);
     // 인스타 입력칸은 테두리가 바깥 래퍼에 있으므로 래퍼에 표시
     const target = field === 'contact_link' ? document.getElementById('contact-link-wrap') : document.getElementById(inputId);
-    target.classList.toggle('has-error', !!conflict);
+    target.classList.toggle('has-error', isError);
   });
-  document.getElementById('seller-submit').disabled = conflicts.length > 0;
+  document.getElementById('seller-submit').disabled = hasBlocking(conflicts);
+}
+
+async function fetchConflicts(payload, excludeToken) {
+  const params = new URLSearchParams(payload);
+  if (excludeToken) params.set('exclude_token', excludeToken);
+  const res = await fetch(`/api/admin/sellers/check?${params}`);
+  return (await res.json()).conflicts;
 }
 
 async function checkDuplicates() {
   const seq = ++checkSeq; // 늦게 도착한 이전 응답이 최신 결과를 덮어쓰지 않게
-  const params = new URLSearchParams(sellerPayload());
   try {
-    const res = await fetch(`/api/admin/sellers/check?${params}`);
-    const data = await res.json();
-    if (seq === checkSeq) renderConflicts(data.conflicts);
+    const conflicts = await fetchConflicts(sellerPayload());
+    if (seq === checkSeq) renderConflicts(conflicts);
   } catch (err) {
     // 확인 실패 시엔 막지 않음 — 서버가 등록할 때 한 번 더 검사함
   }
 }
 
-Object.values(SELLER_INPUTS).forEach(id => {
+Object.entries(SELLER_INPUTS).forEach(([field, id]) => {
   document.getElementById(id).addEventListener('input', () => {
+    delete requiredErrors[field]; // 해당 칸을 고치기 시작하면 필수 에러는 지움
     clearTimeout(checkTimer);
     checkTimer = setTimeout(checkDuplicates, 300);
   });
@@ -205,20 +227,28 @@ Object.values(SELLER_INPUTS).forEach(id => {
 
 document.getElementById('seller-form').addEventListener('submit', async (e) => {
   e.preventDefault();
-  if (currentConflicts.length) {
+  if (hasBlocking(currentConflicts)) {
     showToast('중복된 항목을 먼저 수정해주세요');
     return;
   }
   const payload = sellerPayload();
+  if (!payload.booth_number.replace(/번$/, '')) {
+    requiredErrors.booth_number = '부스 번호를 입력해주세요';
+    renderConflicts(currentConflicts);
+    document.getElementById('booth-number').focus();
+    return;
+  }
   const res = await fetch('/api/admin/sellers', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
   if (res.ok) {
+    const body = await res.json();
     document.getElementById('seller-form').reset();
+    Object.keys(requiredErrors).forEach(k => delete requiredErrors[k]);
     renderConflicts([]);
-    showToast('셀러가 등록됐어요');
+    showToast(body.warnings && body.warnings.length ? '셀러가 등록됐어요 · 같은 이름의 셀러가 있어요' : '셀러가 등록됐어요');
     loadSellers();
   } else {
     const err = await res.json().catch(() => ({}));
@@ -226,6 +256,30 @@ document.getElementById('seller-form').addEventListener('submit', async (e) => {
     if (res.status === 409) checkDuplicates(); // 어느 칸이 겹치는지 표시
   }
 });
+
+// ---------------- 셀러 목록 + 관리자 수정 ----------------
+function boothText(booth) {
+  return booth ? `${escapeHtml(String(booth).trim().replace(/번$/, ''))}번` : '';
+}
+
+function sellerEditFormHtml(s) {
+  const t = s.token;
+  const needsBooth = !s.booth_number;
+  return `
+    <div class="seller-edit" id="edit-${t}" style="display:${needsBooth ? 'block' : 'none'};">
+      <label>셀러 이름 <span class="required-mark">*</span></label>
+      <input type="text" id="e-name-${t}" value="${escapeAttr(s.seller_name)}" oninput="scheduleEditCheck('${t}')" />
+      <label>부스 번호 <span class="required-mark">*</span></label>
+      <input type="text" id="e-booth-${t}" value="${escapeAttr(s.booth_number || '')}" placeholder="예: 7" oninput="scheduleEditCheck('${t}')" />
+      <label>인스타그램 아이디</label>
+      <input type="text" id="e-insta-${t}" value="${escapeAttr(s.contact_link || '')}" placeholder="아이디만 입력" oninput="scheduleEditCheck('${t}')" />
+      <div id="e-msg-${t}"></div>
+      <div style="display:flex; gap:8px;">
+        ${needsBooth ? '' : `<button type="button" class="btn-outline" style="flex:1;" onclick="toggleSellerEdit('${t}')">취소</button>`}
+        <button type="button" class="btn-primary" style="flex:1;" id="e-save-${t}" onclick="saveSellerEdit('${t}')">${needsBooth ? '부스 배정하고 저장' : '저장'}</button>
+      </div>
+    </div>`;
+}
 
 async function loadSellers() {
   const res = await fetch('/api/admin/sellers');
@@ -238,17 +292,25 @@ async function loadSellers() {
   }
 
   listEl.innerHTML = sellers.map(s => `
-    <div style="background:#fff; border:0.5px solid var(--border); border-radius:var(--radius-sm); padding:14px; margin-bottom:10px; display:flex; gap:14px; align-items:center;">
-      <div id="qr-${s.token}" style="flex-shrink:0;"></div>
-      <div style="flex:1; min-width:0;">
-        <p style="margin:0; font-weight:600; font-size:14px;">${escapeHtml(s.seller_name)}${s.booth_number ? ' · ' + escapeHtml(s.booth_number) + (/번$/.test(s.booth_number) ? '' : '번') : ''}${(s.duplicate_fields || []).length ? `<span class="dup-badge" title="다른 셀러와 겹치는 항목이 있어요">중복: ${s.duplicate_fields.map(f => FIELD_LABELS[f]).join(', ')}</span>` : ''}</p>
-        ${s.contact_link ? `<p style="margin:2px 0 0; font-size:12px; color:var(--muted);">@${escapeHtml(s.contact_link)}</p>` : ''}
-        <p style="margin:4px 0; font-size:12px; color:var(--muted); word-break:break-all;">${BASE_URL}/sell?token=${s.token}</p>
-        <button class="btn-outline" style="width:auto; padding:6px 12px; font-size:12px;" onclick="copyLink('${s.token}')">링크 복사</button>
+    <div class="seller-card">
+      <div class="seller-card-row">
+        <div id="qr-${s.token}" style="flex-shrink:0;"></div>
+        <div style="flex:1; min-width:0;">
+          <p style="margin:0; font-weight:600; font-size:14px;">${escapeHtml(s.seller_name)}${s.booth_number ? ' · ' + boothText(s.booth_number) : ''}${(s.duplicate_fields || []).length ? `<span class="dup-badge" title="다른 셀러와 겹치는 항목이 있어요">중복: ${s.duplicate_fields.map(f => FIELD_LABELS[f]).join(', ')}</span>` : ''}</p>
+          ${s.contact_link ? `<p style="margin:2px 0 0; font-size:12px; color:var(--muted);">@${escapeHtml(s.contact_link)}</p>` : ''}
+          ${s.booth_number ? '' : '<p style="margin:4px 0 0;"><span class="dup-badge" style="margin-left:0;">부스 미배정 · 상품 등록 불가</span></p>'}
+          <p style="margin:4px 0; font-size:12px; color:var(--muted); word-break:break-all;">${BASE_URL}/sell?token=${s.token}</p>
+          <div style="display:flex; gap:6px; align-items:center;">
+            <button class="btn-outline" style="width:auto; padding:6px 12px; font-size:12px;" onclick="copyLink('${s.token}')">링크 복사</button>
+            ${s.booth_number ? `<button type="button" class="link-btn" onclick="toggleSellerEdit('${s.token}')">정보 수정</button>` : ''}
+          </div>
+        </div>
       </div>
+      ${sellerEditFormHtml(s)}
     </div>
   `).join('');
 
+  if (typeof QRCode === 'undefined') return; // CDN 차단/오프라인 시 QR만 빠지고 나머지는 동작
   sellers.forEach(s => {
     new QRCode(document.getElementById(`qr-${s.token}`), {
       text: `${BASE_URL}/sell?token=${s.token}`,
@@ -256,6 +318,73 @@ async function loadSellers() {
       height: 72,
     });
   });
+}
+
+function toggleSellerEdit(token) {
+  const el = document.getElementById(`edit-${token}`);
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+  if (el.style.display === 'block') document.getElementById(`e-name-${token}`).focus();
+}
+
+function editPayload(token) {
+  return {
+    seller_name: document.getElementById(`e-name-${token}`).value.trim(),
+    booth_number: document.getElementById(`e-booth-${token}`).value.trim(),
+    contact_link: normalizeInstagramId(document.getElementById(`e-insta-${token}`).value),
+  };
+}
+
+/** 수정 폼 아래 메시지: 오류(빨강, 저장 불가) + 경고(주황, 저장 가능) */
+function renderEditMessages(token, errors, warnings) {
+  document.getElementById(`e-msg-${token}`).innerHTML =
+    errors.map(m => `<p class="field-error">⚠ ${escapeHtml(m)}</p>`).join('') +
+    warnings.map(m => `<p class="field-error is-warning">⚠ ${escapeHtml(m)}</p>`).join('');
+  document.getElementById(`e-save-${token}`).disabled = errors.length > 0;
+}
+
+const editTimers = {};
+const editSeq = {};
+
+function scheduleEditCheck(token) {
+  clearTimeout(editTimers[token]);
+  editTimers[token] = setTimeout(async () => {
+    const seq = editSeq[token] = (editSeq[token] || 0) + 1;
+    try {
+      const conflicts = await fetchConflicts(editPayload(token), token);
+      if (seq !== editSeq[token]) return;
+      renderEditMessages(token,
+        conflicts.filter(c => c.blocking).map(c => c.message),
+        conflicts.filter(c => !c.blocking).map(c => c.message));
+      // 저장을 막는 칸(부스/인스타)에 빨간 테두리 — 등록 폼과 같은 표시
+      const blockingFields = conflicts.filter(c => c.blocking).map(c => c.field);
+      document.getElementById(`e-booth-${token}`).classList.toggle('has-error', blockingFields.includes('booth_number'));
+      document.getElementById(`e-insta-${token}`).classList.toggle('has-error', blockingFields.includes('contact_link'));
+    } catch (err) { /* 저장할 때 서버가 다시 검사함 */ }
+  }, 300);
+}
+
+async function saveSellerEdit(token) {
+  const payload = editPayload(token);
+  const missing = [];
+  if (!payload.seller_name) missing.push('셀러 이름을 입력해주세요');
+  if (!payload.booth_number.replace(/번$/, '')) missing.push('부스 번호를 입력해주세요');
+  if (missing.length) {
+    renderEditMessages(token, missing, []);
+    document.getElementById(`e-save-${token}`).disabled = false;
+    return;
+  }
+  const res = await fetch(`/api/admin/sellers/${encodeURIComponent(token)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const body = await res.json().catch(() => ({}));
+  if (res.ok) {
+    showToast(body.warnings && body.warnings.length ? '저장됐어요 · 같은 이름의 셀러가 있어요' : '저장됐어요');
+    loadSellers();
+  } else {
+    renderEditMessages(token, [typeof body.detail === 'string' ? body.detail : '저장하지 못했어요'], []);
+  }
 }
 
 function copyLink(token) {

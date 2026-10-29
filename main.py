@@ -210,8 +210,29 @@ def init_db():
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_buyer ON orders(buyer_token)")
 
+    create_item_view(conn)
     conn.commit()
     conn.close()
+
+
+# 상품에는 등록 시점의 셀러명/부스/인스타가 복사돼 있지만(과거 구조), 화면에 보여줄 땐 항상
+# 셀러 테이블의 '현재 값'을 쓴다. 셀러가 이름을 바꾸거나 관리자가 부스를 바꾸면 기존 상품에도 바로 반영.
+# 셀러 행이 없을 때(이론상)만 상품에 복사된 값으로 대체한다.
+SELLER_JOINED_COLUMNS = ("seller_name", "booth_number", "contact_link")
+
+
+def create_item_view(conn):
+    """items 컬럼이 마이그레이션으로 늘어날 수 있어서 서버 시작 때마다 view를 다시 만든다"""
+    columns = [row["name"] for row in conn.execute("PRAGMA table_info(items)").fetchall()]
+    select_list = ",\n    ".join(
+        f"COALESCE(s.{c}, i.{c}) AS {c}" if c in SELLER_JOINED_COLUMNS else f"i.{c} AS {c}"
+        for c in columns
+    )
+    conn.execute("DROP VIEW IF EXISTS item_view")
+    conn.execute(
+        f"CREATE VIEW item_view AS SELECT\n    {select_list}\n"
+        "FROM items i LEFT JOIN sellers s ON s.token = i.seller_token"
+    )
 
 
 init_db()
@@ -606,43 +627,76 @@ SELLER_FIELD_LABELS = {  # 받침에 따라 '이에요/예요'가 달라서 문�
     "contact_link": "인스타그램 아이디예요",
 }
 
+# 셀러 데이터 모델
+# - token(내부 ID): 시스템 식별자이자 셀러 화면 접속 열쇠. 바뀌지 않음
+# - 부스 번호: 사람이 부르는 업무 식별자 → 필수 + 중복 불가, 관리자만 변경
+# - 인스타 ID: 같으면 사실상 같은 사람 → 중복 불가 (비어 있으면 검사 안 함)
+# - 셀러명: 표시용 이름. 부스로 구분되므로 중복 허용, 대신 경고만
+BLOCKING_FIELDS = ("booth_number", "contact_link")
+SELLER_NORMALIZERS = {
+    "seller_name": normalize_name,
+    "booth_number": normalize_booth,
+    "contact_link": normalize_instagram,
+}
+
 
 def find_seller_conflicts(conn, seller_name: str, booth_number: str, contact_link: str,
                           exclude_token: Optional[str] = None) -> list:
-    """같은 값을 이미 쓰고 있는 다른 셀러 목록. 비어 있는 값(부스/인스타)은 검사하지 않는다."""
+    """
+    같은 값을 이미 쓰고 있는 다른 셀러 목록.
+    blocking=True(부스/인스타)면 저장 불가, False(셀러명)면 경고만.
+    """
     targets = {
         "seller_name": normalize_name(seller_name),
         "booth_number": normalize_booth(booth_number),
         "contact_link": normalize_instagram(contact_link),
     }
-    normalizers = {
-        "seller_name": normalize_name,
-        "booth_number": normalize_booth,
-        "contact_link": normalize_instagram,
-    }
-    conflicts = []
+    conflicts, seen = [], set()
     for row in conn.execute("SELECT token, seller_name, booth_number, contact_link FROM sellers").fetchall():
         if exclude_token and row["token"] == exclude_token:
             continue
         for field, target in targets.items():
-            if target and normalizers[field](row[field]) == target:
-                conflicts.append({
-                    "field": field,
-                    "existing_seller": row["seller_name"],
-                    "message": f"이미 등록된 {SELLER_FIELD_LABELS[field]} ({row['seller_name']})",
-                })
-    # 같은 필드에서 여러 셀러와 겹치면 첫 번째만
-    seen, unique = set(), []
-    for c in conflicts:
-        if c["field"] not in seen:
-            seen.add(c["field"])
-            unique.append(c)
-    return unique
+            if field in seen or not target or SELLER_NORMALIZERS[field](row[field]) != target:
+                continue
+            seen.add(field)  # 같은 필드에서 여러 셀러와 겹치면 첫 번째만
+            blocking = field in BLOCKING_FIELDS
+            booth = f" · {normalize_booth(row['booth_number'])}번 부스" if normalize_booth(row["booth_number"]) else ""
+            conflicts.append({
+                "field": field,
+                "blocking": blocking,
+                "existing_seller": row["seller_name"],
+                "message": (
+                    f"이미 등록된 {SELLER_FIELD_LABELS[field]} ({row['seller_name']}{booth})"
+                    if blocking
+                    else f"같은 이름의 셀러가 이미 있어요 ({row['seller_name']}{booth}). 다른 셀러라면 그대로 저장해도 돼요"
+                ),
+            })
+    return conflicts
 
 
-def raise_if_conflicts(conflicts: list):
-    if conflicts:
-        raise HTTPException(status_code=409, detail=" / ".join(c["message"] for c in conflicts))
+def check_seller_conflicts(conn, seller_name: str, booth_number: str, contact_link: str,
+                           exclude_token: Optional[str] = None) -> list:
+    """차단 대상이 있으면 409, 없으면 경고 메시지 목록을 돌려준다"""
+    conflicts = find_seller_conflicts(conn, seller_name, booth_number, contact_link, exclude_token)
+    blocking = [c for c in conflicts if c["blocking"]]
+    if blocking:
+        raise HTTPException(status_code=409, detail=" / ".join(c["message"] for c in blocking))
+    return [c["message"] for c in conflicts]
+
+
+def clean_seller_fields(seller_name: str, booth_number: Optional[str], contact_link: str) -> tuple:
+    """공통 입력 정리 + 필수값 검사. booth_number=None이면 부스는 검사하지 않음(셀러 본인 수정)"""
+    seller_name = (seller_name or "").strip()
+    contact_link = normalize_instagram(contact_link)
+    if not seller_name:
+        raise HTTPException(status_code=400, detail="셀러 이름을 입력해주세요")
+    if len(seller_name) > 40:
+        raise HTTPException(status_code=400, detail="셀러 이름은 40자 이내로 입력해주세요")
+    if booth_number is not None:
+        booth_number = booth_number.strip()
+        if not normalize_booth(booth_number):
+            raise HTTPException(status_code=400, detail="부스 번호를 입력해주세요")
+    return seller_name, booth_number, contact_link
 
 
 class SellerUpdate(BaseModel):
@@ -652,25 +706,21 @@ class SellerUpdate(BaseModel):
 
 @app.patch("/api/sellers/{token}")
 def update_seller_info(token: str, payload: SellerUpdate):
-    """셀러 본인이 이름/연락처만 수정 가능. 부스번호는 관리자만 변경 가능."""
-    seller_name = payload.seller_name.strip()
-    contact_link = normalize_instagram(payload.contact_link)
-    if not seller_name:
-        raise HTTPException(status_code=400, detail="셀러 이름을 입력해주세요")
+    """셀러 본인: 셀러명/인스타만 수정 가능. 부스 번호는 관리자만 변경 가능."""
+    seller_name, _, contact_link = clean_seller_fields(payload.seller_name, None, payload.contact_link)
     with write_tx() as tx:
         if not tx.execute("SELECT 1 FROM sellers WHERE token = ?", (token,)).fetchone():
             raise HTTPException(status_code=403, detail="유효하지 않은 셀러 토큰입니다")
-        # 부스 번호는 셀러가 못 바꾸므로 이름/인스타만 검사
-        raise_if_conflicts(find_seller_conflicts(tx, seller_name, "", contact_link, exclude_token=token))
+        warnings = check_seller_conflicts(tx, seller_name, "", contact_link, exclude_token=token)
         tx.execute(
             "UPDATE sellers SET seller_name = ?, contact_link = ? WHERE token = ?",
             (seller_name, contact_link, token),
         )
-    return get_seller_by_token(token)
+    return {**get_seller_by_token(token), "warnings": warnings}
 
 
 # ---------------------------------------------------------------------------
-# 관리자: 셀러 사전 등록 (본인만 사용 — QR 발급 전 미리 셀러 목록을 입력)
+# 관리자: 셀러 사전 등록 / 전체 항목 수정 (본인만 사용 — QR 발급 전 미리 셀러 목록을 입력)
 # ---------------------------------------------------------------------------
 class SellerCreate(BaseModel):
     seller_name: str
@@ -679,31 +729,55 @@ class SellerCreate(BaseModel):
 
 
 @app.get("/api/admin/sellers/check")
-def check_seller_duplicates(seller_name: str = "", booth_number: str = "", contact_link: str = ""):
-    """관리자 화면에서 입력하는 동안 실시간으로 중복을 알려주기 위한 조회용 API"""
+def check_seller_duplicates(seller_name: str = "", booth_number: str = "", contact_link: str = "",
+                            exclude_token: str = ""):
+    """관리자 화면에서 입력하는 동안 실시간으로 중복을 알려주기 위한 조회용 API (수정 중엔 자기 자신 제외)"""
     conn = get_db()
-    conflicts = find_seller_conflicts(conn, seller_name, booth_number, contact_link)
+    conflicts = find_seller_conflicts(conn, seller_name, booth_number, contact_link, exclude_token or None)
     conn.close()
     return {"conflicts": conflicts}
 
 
 @app.post("/api/admin/sellers")
 def create_seller(payload: SellerCreate):
-    seller_name = payload.seller_name.strip()
-    booth_number = payload.booth_number.strip()
-    contact_link = normalize_instagram(payload.contact_link)
-    if not seller_name:
-        raise HTTPException(status_code=400, detail="셀러 이름을 입력해주세요")
-
+    seller_name, booth_number, contact_link = clean_seller_fields(
+        payload.seller_name, payload.booth_number, payload.contact_link
+    )
     token = str(uuid.uuid4())[:10]
-    # 검사와 저장을 한 트랜잭션에서 — 동시에 같은 셀러를 두 번 등록하는 경우도 막힘
+    # 검사와 저장을 한 트랜잭션에서 — 동시에 같은 부스/인스타로 두 번 등록하는 경우도 막힘
     with write_tx() as tx:
-        raise_if_conflicts(find_seller_conflicts(tx, seller_name, booth_number, contact_link))
+        warnings = check_seller_conflicts(tx, seller_name, booth_number, contact_link)
         tx.execute(
             "INSERT INTO sellers (token, seller_name, booth_number, contact_link) VALUES (?, ?, ?, ?)",
             (token, seller_name, booth_number, contact_link),
         )
-    return {"token": token, "sell_url": f"/sell?token={token}"}
+    return {"token": token, "sell_url": f"/sell?token={token}", "warnings": warnings}
+
+
+class SellerAdminUpdate(BaseModel):
+    seller_name: str
+    booth_number: str
+    contact_link: str = ""
+
+
+@app.patch("/api/admin/sellers/{token}")
+def admin_update_seller(token: str, payload: SellerAdminUpdate):
+    """
+    관리자: 모든 항목 수정. 부스 필수화 이전에 부스 없이 등록된 셀러에게 부스를 배정하는 용도이기도 하다.
+    상품 화면은 셀러 정보를 셀러 테이블에서 JOIN해 가져오므로, 여기서 바꾸면 기존 상품에도 바로 반영된다.
+    """
+    seller_name, booth_number, contact_link = clean_seller_fields(
+        payload.seller_name, payload.booth_number, payload.contact_link
+    )
+    with write_tx() as tx:
+        if not tx.execute("SELECT 1 FROM sellers WHERE token = ?", (token,)).fetchone():
+            raise HTTPException(status_code=404, detail="셀러를 찾을 수 없어요")
+        warnings = check_seller_conflicts(tx, seller_name, booth_number, contact_link, exclude_token=token)
+        tx.execute(
+            "UPDATE sellers SET seller_name = ?, booth_number = ?, contact_link = ? WHERE token = ?",
+            (seller_name, booth_number, contact_link, token),
+        )
+    return {**get_seller_by_token(token), "warnings": warnings}
 
 
 @app.get("/api/admin/sellers")
@@ -713,17 +787,17 @@ def list_sellers():
     conn.close()
     sellers = [dict(row) for row in rows]
 
-    # 중복 체크 도입 전에 이미 들어간 중복 데이터를 관리자가 알아볼 수 있게 표시
-    normalizers = {"seller_name": normalize_name, "booth_number": normalize_booth, "contact_link": normalize_instagram}
-    counts = {field: {} for field in normalizers}
+    # 규칙 도입 전에 이미 들어간 중복 데이터(부스/인스타)를 관리자가 알아볼 수 있게 표시
+    counts = {field: {} for field in BLOCKING_FIELDS}
     for s in sellers:
-        for field, fn in normalizers.items():
-            key = fn(s[field])
+        for field in BLOCKING_FIELDS:
+            key = SELLER_NORMALIZERS[field](s[field])
             if key:
                 counts[field][key] = counts[field].get(key, 0) + 1
     for s in sellers:
         s["duplicate_fields"] = [
-            field for field, fn in normalizers.items() if fn(s[field]) and counts[field][fn(s[field])] > 1
+            field for field in BLOCKING_FIELDS
+            if SELLER_NORMALIZERS[field](s[field]) and counts[field][SELLER_NORMALIZERS[field](s[field])] > 1
         ]
     return sellers
 
@@ -756,6 +830,10 @@ async def create_item(
     seller = get_seller_by_token(token)
     if not seller:
         raise HTTPException(status_code=403, detail="유효하지 않은 셀러 토큰입니다")
+    if not normalize_booth(seller["booth_number"]):
+        raise HTTPException(
+            status_code=403, detail="부스 번호가 배정되지 않아 상품을 등록할 수 없어요. 운영진에게 문의해주세요"
+        )
 
     # 이미지 저장 전에 판매 조건부터 검증 (잘못된 요청에 파일만 남는 걸 방지)
     if price <= 0 or price > MAX_PRICE:
@@ -828,7 +906,7 @@ def list_items(category: Optional[str] = None, status: Optional[str] = "availabl
     """
     finalize_expired_auctions()
     conn = get_db()
-    query = "SELECT * FROM items WHERE 1=1"
+    query = "SELECT * FROM item_view WHERE 1=1"
     params = []
     if category and category != "전체":
         query += " AND category = ?"
@@ -858,7 +936,7 @@ def get_item(item_id: str):
     conn = get_db()
     conn.execute("UPDATE items SET views = views + 1 WHERE id = ?", (item_id,))
     conn.commit()
-    row = conn.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+    row = conn.execute("SELECT * FROM item_view WHERE id = ?", (item_id,)).fetchone()
     conn.close()
     if not row:
         raise HTTPException(status_code=404, detail="상품을 찾을 수 없습니다")
@@ -956,7 +1034,7 @@ def edit_item(item_id: str, payload: ItemUpdate):
             "UPDATE items SET category = ?, title = ?, description = ?, price = ?, version = version + 1 WHERE id = ?",
             (payload.category, payload.title, payload.description, payload.price, item_id),
         )
-        row = tx.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+        row = tx.execute("SELECT * FROM item_view WHERE id = ?", (item_id,)).fetchone()
     return public_item(row)
 
 
@@ -990,7 +1068,7 @@ def my_items(token: str):
     finalize_expired_auctions()
     conn = get_db()
     rows = conn.execute(
-        "SELECT * FROM items WHERE seller_token = ? ORDER BY created_at DESC", (token,)
+        "SELECT * FROM item_view WHERE seller_token = ? ORDER BY created_at DESC", (token,)
     ).fetchall()
     now = now_utc()
     result = []
@@ -1090,7 +1168,7 @@ def place_bid(item_id: str, payload: BidIn):
         if cur.rowcount != 1:
             # 읽은 뒤에 누군가 먼저 반영함 → 이 트랜잭션 전체(입찰 insert 포함) 롤백
             raise HTTPException(status_code=409, detail="다른 입찰이 먼저 반영됐어요. 다시 시도해주세요")
-        updated = tx.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+        updated = tx.execute("SELECT * FROM item_view WHERE id = ?", (item_id,)).fetchone()
 
     return {"bid_id": bid_id, "extended": extended, "item": public_item(updated, now)}
 
@@ -1102,7 +1180,7 @@ def buy_now(item_id: str, payload: BuyerIn):
     now = now_utc()
 
     with write_tx() as tx:
-        row = tx.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+        row = tx.execute("SELECT * FROM item_view WHERE id = ?", (item_id,)).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="상품을 찾을 수 없습니다")
         item = dict(row)
@@ -1156,7 +1234,7 @@ def item_bids(item_id: str, buyer_token: Optional[str] = None):
     """
     finalize_expired_auctions()
     conn = get_db()
-    row = conn.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+    row = conn.execute("SELECT * FROM item_view WHERE id = ?", (item_id,)).fetchone()
     if not row:
         conn.close()
         raise HTTPException(status_code=404, detail="상품을 찾을 수 없습니다")
@@ -1194,7 +1272,7 @@ def buyer_activity(buyer_token: str):
     conn = get_db()
     rows = conn.execute(
         """
-        SELECT * FROM items
+        SELECT * FROM item_view
          WHERE id IN (SELECT item_id FROM bids WHERE buyer_token = ?)
             OR id IN (SELECT item_id FROM orders WHERE buyer_token = ? AND status != 'canceled')
          ORDER BY created_at DESC
