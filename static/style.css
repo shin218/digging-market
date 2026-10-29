@@ -461,6 +461,9 @@ textarea {
   font-size: 12px;
   color: var(--muted);
   margin: 2px 0 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sold-badge {
@@ -1098,4 +1101,41 @@ button:disabled {
     animation: none;
     opacity: 0.93;
   }
+}
+
+/* ---------- 관리자: 필수 표시 ---------- */
+.required-mark {
+  color: var(--brand);
+  font-weight: 700;
+}
+
+
+/* ---------- 관리자: 셀러 카드 / 수정 폼 / 경고 ---------- */
+.seller-card {
+  background: #fff;
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  margin-bottom: 10px;
+}
+
+.seller-card-row {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+
+.seller-edit {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 0.5px solid var(--border);
+}
+
+.seller-edit .field-error {
+  margin: 0 0 8px;
+}
+
+/* 셀러명 중복처럼 저장은 되지만 알려줄 것 — 주황 */
+.field-error.is-warning {
+  color: #a87a2c;
 }

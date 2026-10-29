@@ -49,6 +49,11 @@
       </div>
     </div>
 
+    <div id="booth-missing" class="closed-notice" style="display:none;">
+      ⚠️ 아직 부스 번호가 배정되지 않아 상품을 등록할 수 없어요.<br>
+      <span>운영진에게 부스 배정을 요청해주세요. 배정되면 이 화면을 새로고침하면 돼요.</span>
+    </div>
+
     <form id="sell-form" style="display:none;">
       <div class="upload-box" id="upload-box">
         <div class="placeholder" id="upload-placeholder">
@@ -173,6 +178,11 @@ async function verifySeller() {
     if (!res.ok) throw new Error('invalid token');
     currentSeller = await res.json();
     renderSellerBadge();
+    if (!(currentSeller.booth_number || '').trim()) {
+      // 부스가 배정되지 않은 셀러는 상품 등록 불가 (서버에서도 막음)
+      document.getElementById('booth-missing').style.display = 'block';
+      return;
+    }
     document.getElementById('sell-form').style.display = 'block';
   } catch (err) {
     badge.textContent = '⚠️ 접근 권한이 없어요. 셀러용 QR코드로 다시 접속해주세요.';
@@ -220,7 +230,10 @@ async function saveSellerInfo() {
     currentSeller = await res.json();
     renderSellerBadge();
     toggleEditForm(false);
-    showToast('정보가 저장됐어요');
+    // 셀러명은 다른 셀러와 같아도 저장되지만(부스로 구분), 알려는 준다
+    showToast(currentSeller.warnings && currentSeller.warnings.length
+      ? '저장됐어요 · 같은 이름의 셀러가 있어요'
+      : '정보가 저장됐어요');
   } catch (err) {
     showToast(err.message || '저장 중 오류가 발생했어요');
   }
