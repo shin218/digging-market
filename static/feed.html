@@ -25,7 +25,7 @@
     <div class="filter-row" id="filter-row">
       <span class="tag selectable active" data-value="전체">전체</span>
       <span id="category-filter-slot"></span>
-      <span class="tag selectable" id="liked-only-toggle">♡ 찜한 것만</span>
+      <span class="tag selectable" id="liked-only-toggle">♡ 찜한 것</span>
       <span class="tag selectable" id="my-activity-toggle" style="white-space:nowrap;">🔨 내 입찰·구매</span>
     </div>
 
@@ -211,23 +211,39 @@ async function loadCategoryFilters() {
   bindFilterTags();
 }
 
+// 필터는 OR 조건: 카테고리를 고르고 '찜한 것'도 켜면 [그 카테고리 상품] + [찜한 상품]을 합쳐서 보여준다.
+// '전체'는 아무 필터도 없는 상태라서, 다른 필터가 하나라도 켜져 있으면 꺼진 것으로 표시하고 누르면 모두 초기화한다.
+function syncFilterChips() {
+  document.querySelectorAll('#filter-row .tag[data-value]').forEach(tag => {
+    const active = tag.dataset.value === '전체'
+      ? currentCategory === '전체' && !likedOnly
+      : tag.dataset.value === currentCategory;
+    tag.classList.toggle('active', active);
+  });
+}
+
 function bindFilterTags() {
-  const allTags = document.querySelectorAll('#filter-row .tag[data-value]');
-  allTags.forEach(tag => {
-    tag.classList.toggle('active', tag.dataset.value === currentCategory);
+  document.querySelectorAll('#filter-row .tag[data-value]').forEach(tag => {
     tag.addEventListener('click', () => {
-      allTags.forEach(t => t.classList.remove('active'));
-      tag.classList.add('active');
-      currentCategory = tag.dataset.value;
+      if (tag.dataset.value === '전체') {
+        currentCategory = '전체';
+        setLikedOnly(false);
+      } else {
+        // 이미 선택된 카테고리를 다시 누르면 선택 해제
+        currentCategory = currentCategory === tag.dataset.value ? '전체' : tag.dataset.value;
+      }
+      syncFilterChips();
       loadItems();
     });
   });
+  syncFilterChips();
 }
 
 function setLikedOnly(on) {
   likedOnly = on;
   likedOnlyToggle.classList.toggle('active', on);
-  likedOnlyToggle.textContent = on ? '♥ 찜한 것만' : '♡ 찜한 것만';
+  likedOnlyToggle.textContent = on ? '♥ 찜한 것' : '♡ 찜한 것';
+  syncFilterChips();
 }
 
 likedOnlyToggle.addEventListener('click', () => {
@@ -262,7 +278,8 @@ async function loadItems() {
   } else {
     // 예약중·판매완료 상품도 목록에 남긴다 (구매/입찰 버튼만 막음). 유찰된 경매는 제외
     const params = new URLSearchParams({ status: 'available,reserved,sold_out' });
-    if (currentCategory !== '전체') params.set('category', currentCategory);
+    // 찜이 켜져 있으면 다른 카테고리의 찜 상품도 보여야 하므로 카테고리로 미리 거르지 않는다
+    if (currentCategory !== '전체' && !likedOnly) params.set('category', currentCategory);
     url = `/api/items?${params}`;
   }
 
@@ -274,7 +291,9 @@ async function loadItems() {
       items = items.filter(item => item.category === currentCategory);
     }
     if (likedOnly) {
-      items = items.filter(item => likedItems.has(item.id));
+      // OR 조건: 찜한 상품이거나, 선택한 카테고리 상품
+      items = items.filter(item =>
+        likedItems.has(item.id) || (currentCategory !== '전체' && item.category === currentCategory));
     }
     currentItems = items;
 
@@ -282,9 +301,7 @@ async function loadItems() {
       if (myActivity) {
         listEl.innerHTML = '<div class="empty-state">아직 입찰하거나 구매한 상품이 없어요.<br>🔨 경매 상품에 입찰해보세요</div>';
       } else {
-        listEl.innerHTML = likedOnly
-          ? '<div class="empty-state">아직 찜한 상품이 없어요.<br>마음에 드는 물건에 하트를 눌러보세요 🤍</div>'
-          : '<div class="empty-state">아직 등록된 상품이 없어요.<br>곧 새로운 물건이 올라올 거예요 👀</div>';
+        listEl.innerHTML = emptyMessage();
       }
       return;
     }
@@ -369,6 +386,16 @@ function renderItem(item) {
   `;
 }
 
+function emptyMessage() {
+  if (likedOnly && currentCategory !== '전체') {
+    return `<div class="empty-state">찜한 상품도, ${escapeHtml(currentCategory)} 상품도 아직 없어요.</div>`;
+  }
+  if (likedOnly) {
+    return '<div class="empty-state">아직 찜한 상품이 없어요.<br>마음에 드는 물건에 하트를 눌러보세요 🤍</div>';
+  }
+  return '<div class="empty-state">아직 등록된 상품이 없어요.<br>곧 새로운 물건이 올라올 거예요 👀</div>';
+}
+
 async function toggleLike(itemId, btn) {
   const isLiked = likedItems.has(itemId);
   const newLiked = !isLiked;
@@ -387,11 +414,13 @@ async function toggleLike(itemId, btn) {
       likedItems.delete(itemId);
       btn.classList.remove('liked');
       btn.textContent = '♡';
-      if (likedOnly) {
+      const item = currentItems.find(i => i.id === itemId);
+      const stillMatches = item && currentCategory !== '전체' && item.category === currentCategory;
+      if (likedOnly && !stillMatches) {
         btn.closest('.item-card').remove();
+        currentItems = currentItems.filter(i => i.id !== itemId);
         if (document.querySelectorAll('#item-list .item-card').length === 0) {
-          document.getElementById('item-list').innerHTML =
-            '<div class="empty-state">아직 찜한 상품이 없어요.<br>마음에 드는 물건에 하트를 눌러보세요 🤍</div>';
+          document.getElementById('item-list').innerHTML = emptyMessage();
         }
       }
     }
