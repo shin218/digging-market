@@ -13,6 +13,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 <meta name="apple-mobile-web-app-title" content="Digging Market" />
+<script src="/static/analytics.js"></script>
 </head>
 <body>
 <div class="app">
@@ -408,6 +409,7 @@ async function toggleLike(itemId, btn) {
     });
     if (newLiked) {
       likedItems.add(itemId);
+      dmTrack('item_liked', { item_id: itemId });
       btn.classList.add('liked');
       btn.textContent = '♥';
     } else {
@@ -452,6 +454,7 @@ function openDetail(itemId) {
   detailItem = item;
   actionsRenderedFor = null;
   editingBuyer = false;
+  dmTrack('item_viewed', { item_id: item.id, category: item.category, sale_type: item.sale_type, status: item.status });
 
   const content = document.getElementById('modal-content');
   content.classList.remove('closed-view');
@@ -539,7 +542,7 @@ function renderFixedDetail(item) {
     html += `<div class="result-box">✅ 구매가 확정된 상품이에요. 셀러에게 연락해서 거래를 마무리해주세요.</div>`;
     contact.innerHTML = contactButtonHtml(item);
   } else if (item.buy_now_available) {
-    html += `<div id="buyer-slot">${buyerBoxHtml()}</div>
+    html += `<div id="buyer-slot" class="ph-no-capture">${buyerBoxHtml()}</div>
       <button class="btn-primary btn-block" id="buy-now-btn" onclick="submitBuyNow()">⚡ ${won(item.display_price)}에 즉시구매</button>`;
     contact.innerHTML = contactButtonHtml(item, '구매 전에 셀러에게 문의하기').replace('btn-primary', 'btn-outline');
   } else {
@@ -621,7 +624,7 @@ async function refreshAuction() {
   } else {
     if (actionsRenderedFor !== itemId) {
       actionsEl.innerHTML = `
-        <div id="buyer-slot">${buyerBoxHtml()}</div>
+        <div id="buyer-slot" class="ph-no-capture">${buyerBoxHtml()}</div>
         <label>입찰 금액 (원)</label>
         <div class="bid-row">
           <input type="text" inputmode="numeric" id="bid-amount" oninput="formatPriceInput(this)" />
@@ -708,6 +711,7 @@ async function submitBid() {
       showToast(await readError(res, '입찰하지 못했어요'));
     } else {
       const body = await res.json();
+      dmTrack('bid_placed', { item_id: detailItem.id, category: detailItem.category, amount, extended: !!body.extended });
       showToast(body.extended ? '입찰 완료! 마감 직전이라 3분 연장됐어요' : '입찰 완료!');
       document.getElementById('bid-amount').value = '';
       document.getElementById('buyer-slot').innerHTML = buyerBoxHtml();
@@ -741,13 +745,14 @@ async function submitBuyNow() {
       if (item.sale_type === 'auction') refreshAuction();
       return;
     }
+    dmTrack('buy_now_completed', { item_id: item.id, category: item.category, sale_type: item.sale_type, price });
     stopPolling();
     document.getElementById('detail-body').innerHTML = `
       <div class="price-panel">
         <div class="row"><span style="font-size:12px; color:var(--muted);">구매가</span></div>
         <div class="big">${won(price)}</div>
       </div>
-      <div class="result-box">✅ 구매가 확정됐어요! 셀러에게 연락해서 거래를 마무리해주세요.<br>내 연락처(${escapeHtml(buyer.buyer_contact)})도 셀러에게 전달됐어요.</div>
+      <div class="result-box ph-no-capture">✅ 구매가 확정됐어요! 셀러에게 연락해서 거래를 마무리해주세요.<br>내 연락처(${escapeHtml(buyer.buyer_contact)})도 셀러에게 전달됐어요.</div>
     `;
     document.getElementById('detail-contact').innerHTML = contactButtonHtml(item);
     loadItems();
