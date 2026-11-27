@@ -488,6 +488,21 @@ class FeedbackIn(BaseModel):
 # 카테고리 관리 — admin이 관리하고, 랜딩/피드/셀러등록/내상품관리가 여기서 끌어옴
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
+# 클라이언트 설정 — 방문 분석(PostHog) 키는 환경변수로만 받는다
+# ---------------------------------------------------------------------------
+DEFAULT_POSTHOG_HOST = "https://us.i.posthog.com"
+
+
+@app.get("/api/config")
+def get_client_config():
+    key = os.environ.get("POSTHOG_KEY", "").strip()
+    host = os.environ.get("POSTHOG_HOST", "").strip().rstrip("/") or DEFAULT_POSTHOG_HOST
+    if not key or not host.startswith("https://"):
+        return {"posthog_key": "", "posthog_host": ""}
+    return {"posthog_key": key, "posthog_host": host}
+
+
+# ---------------------------------------------------------------------------
 # 행사 정보 (날짜/시간/장소) — admin이 설정하고 랜딩 페이지가 끌어옴
 # ---------------------------------------------------------------------------
 EVENT_SETTING_KEYS = ("event_date", "event_time", "event_place")

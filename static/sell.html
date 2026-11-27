@@ -13,6 +13,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 <meta name="apple-mobile-web-app-title" content="Digging Market" />
+<script src="/static/analytics.js"></script>
 </head>
 <body>
 <div class="app">
@@ -354,6 +355,7 @@ document.getElementById('sell-form').addEventListener('submit', async (e) => {
       const body = await res.json().catch(() => ({}));
       throw new Error(typeof body.detail === 'string' ? body.detail : '등록 중 오류가 발생했어요');
     }
+    dmTrack('item_registered', { category: categorySelect.value, sale_type: saleType });
     showToast('등록되었습니다!');
     setTimeout(() => location.href = '/feed', 800);
   } catch (err) {
